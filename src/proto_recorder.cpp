@@ -62,7 +62,7 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   updater_ = std::make_unique<diagnostic_updater::Updater>(this);
   updater_->setHardwareID("proto_recorder");
   updater_->add("topic_rates", std::bind(&ProtoRecorder::check_topic_rates, this, std::placeholders::_1));
-  
+  updater_->setPeriod(diagnostics_period_);
   
   RCLCPP_INFO(
     this->get_logger(),
