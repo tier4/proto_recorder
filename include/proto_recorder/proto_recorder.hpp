@@ -50,7 +50,10 @@ private:
     const std::string & topic_name, const std::string & topic_type, const rclcpp::QoS & qos);
 
   // Get topic names and types
-  std::unordered_map<std::string, std::string> get_topic_names_and_types();
+  std::unordered_map<std::string, std::string> fetch_topic_names_and_types();
+
+  // Retry subscribing to topics
+  void retry_topics();
 
   // Member variables
   std::shared_ptr<rosbag2_cpp::Writer> writer_;
@@ -59,6 +62,12 @@ private:
   std::unordered_map<std::string, std::shared_ptr<rclcpp::GenericSubscription>> subscriptions_;
   std::atomic<bool> paused_{false};
   std::string serialization_format_;
+  
+  // Timer for retrying subscription to specified topics
+  rclcpp::TimerBase::SharedPtr topic_retry_timer_;
+  
+  // Flag to indicate if all topics are subscribed
+  std::atomic<bool> all_topics_subscribed_{false};
 };
 
 }  // namespace proto_recorder

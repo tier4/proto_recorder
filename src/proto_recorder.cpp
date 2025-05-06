@@ -67,19 +67,17 @@ void ProtoRecorder::record()
     storage_options_,
     {rmw_get_serialization_format(), record_options_.rmw_serialization_format});
 
-  if (record_options_.all) {
-    RCLCPP_INFO(get_logger(), "Getting all available topics");
-    // Get all available topics
-    auto topics_and_types = get_topic_names_and_types();
-    std::vector<std::string> topics;
-    for (const auto & topic_and_type : topics_and_types) {
-      topics.push_back(topic_and_type.first);
-    }
-    subscribe_topics(topics);
-  } else if (!record_options_.topics.empty()) {
+  if (!record_options_.topics.empty()) {
     RCLCPP_INFO(get_logger(), "Subscribing to specified topics");
     // Subscribe to specified topics
     subscribe_topics(record_options_.topics);
+    
+    // Start a timer to retry subscribing to topics that weren't found
+    topic_retry_timer_ = this->create_wall_timer(
+      std::chrono::seconds(1),
+      std::bind(&ProtoRecorder::retry_topics, this));
+  } else {
+    RCLCPP_WARN(get_logger(), "No topics specified for recording.");
   }
 
   if (record_options_.start_paused) {
@@ -92,6 +90,11 @@ void ProtoRecorder::record()
 
 void ProtoRecorder::stop()
 {
+  // Cancel timer if it exists
+  if (topic_retry_timer_) {
+    topic_retry_timer_->cancel();
+  }
+  
   subscriptions_.clear();
   if (writer_) {
     writer_->close();
@@ -118,13 +121,13 @@ bool ProtoRecorder::is_paused() const
 
 void ProtoRecorder::subscribe_topics(const std::vector<std::string> & topics)
 {
+  // Fetch topic names and types once
+  auto topics_and_types = fetch_topic_names_and_types();
+  RCLCPP_INFO(get_logger(), "Successfully got topic names and types");
+  
   for (const auto & topic : topics) {
     RCLCPP_INFO(get_logger(), "Subscribing to topic: %s", topic.c_str());
-    // Get topic type
-    auto topics_and_types = get_topic_names_and_types();
-    RCLCPP_INFO(get_logger(), "Successfully got topic names and types");
     auto it = topics_and_types.find(topic);
-    RCLCPP_INFO(get_logger(), "Successfully found topic in topics_and_types");
     if (it != topics_and_types.end()) {
       subscribe_topic(topic, it->second);
     } else {
@@ -173,31 +176,29 @@ std::shared_ptr<rclcpp::GenericSubscription> ProtoRecorder::create_subscription(
     topic_type,
     qos,
     [this, topic_name, topic_type](std::shared_ptr<rclcpp::SerializedMessage> message) {
-      if (!paused_.load()) {
+      // 全てのトピックが購読されるまで記録を開始しない
+      if (!paused_.load() && all_topics_subscribed_) {
         writer_->write(message, topic_name, topic_type, this->get_clock()->now());
       }
     });
   return subscription;
 }
 
-std::unordered_map<std::string, std::string> ProtoRecorder::get_topic_names_and_types()
+std::unordered_map<std::string, std::string> ProtoRecorder::fetch_topic_names_and_types()
 {
   RCLCPP_INFO(get_logger(), "Getting topic names and types");
   std::unordered_map<std::string, std::string> topics_and_types;
   
-  // Call the parent class method instead of recursively calling this method
-  auto topic_names_and_types = rclcpp::Node::get_topic_names_and_types();
+  // Use the Node's method to get topic names and types
+  auto topic_names_and_types = this->get_node_graph_interface()->get_topic_names_and_types();
   
-  // RCLCPP_INFO(get_logger(), "Topic names and types: %zu", topic_names_and_types.size());
   for (const auto & topic_name_and_types : topic_names_and_types) {
     const auto & topic_name = topic_name_and_types.first;
     const auto & type_names = topic_name_and_types.second;
     
-    // Fix the logging - type_names is a vector, not a string
     RCLCPP_INFO(get_logger(), "Topic name: %s, Type count: %zu", 
                 topic_name.c_str(), type_names.size());
     
-    // Skip if no type or multiple types (we only handle single type per topic)
     if (type_names.empty() || type_names.size() > 1) {
       continue;
     }
@@ -207,6 +208,30 @@ std::unordered_map<std::string, std::string> ProtoRecorder::get_topic_names_and_
   }
   RCLCPP_INFO(get_logger(), "Topics and types: %zu", topics_and_types.size());
   return topics_and_types;
+}
+
+void ProtoRecorder::retry_topics()
+{
+  if (!record_options_.topics.empty()) {
+    std::vector<std::string> topics_to_retry;
+    
+    for (const auto & topic : record_options_.topics) {
+      // Check if we're already subscribed to this topic
+      if (subscriptions_.find(topic) == subscriptions_.end()) {
+        topics_to_retry.push_back(topic);
+      }
+    }
+    
+    if (!topics_to_retry.empty()) {
+      RCLCPP_INFO(get_logger(), "Retrying subscription to %zu topics", topics_to_retry.size());
+      subscribe_topics(topics_to_retry);
+    } else {
+      // All topics are subscribed, cancel the timer
+      RCLCPP_INFO(get_logger(), "All requested topics are now subscribed");
+      all_topics_subscribed_ = true;
+      topic_retry_timer_->cancel();
+    }
+  }
 }
 
 }  // namespace proto_recorder
