@@ -23,6 +23,7 @@
   <!-- Topic rate check arguments -->
   <arg name="rate_check_window_size" default="10" description="Number of messages to use for rate calculation"/>
   <arg name="diagnostics_period" default="5.0" description="Period in seconds for publishing diagnostics"/>
+  <arg name="wait_for_stable_rates" default="false" description="Wait for stable rates before recording"/>
 
   <!-- Launch the proto_recorder node with parameters -->
   <node pkg="proto_recorder" exec="proto_recorder_node" name="proto_recorder_node" output="screen">
@@ -48,5 +49,6 @@
     <!-- Topic rate check parameters -->
     <param name="rate_check_window_size" value="$(var rate_check_window_size)"/>
     <param name="diagnostics_period" value="$(var diagnostics_period)"/>
+    <param name="wait_for_stable_rates" value="$(var wait_for_stable_rates)"/>
   </node>
 </launch>

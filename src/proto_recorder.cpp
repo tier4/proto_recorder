@@ -49,11 +49,14 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   rate_check_window_size_ = static_cast<size_t>(declare_parameter<int64_t>("rate_check_window_size", 10));
   diagnostics_period_ = declare_parameter<double>("diagnostics_period", 1.0);
   
+  // Add parameter to wait for stable rates before recording
+  wait_for_stable_rates_ = declare_parameter<bool>("wait_for_stable_rates", false);
+  
   // Initialize writer
   writer_ = std::make_shared<rosbag2_cpp::Writer>();
   
-  // Set initial paused state
-  paused_ = record_options_.start_paused;
+  // Set initial paused state - pause if we're waiting for stable rates or start_paused is true
+  paused_ = record_options_.start_paused || wait_for_stable_rates_;
   
   // Set serialization format
   serialization_format_ = record_options_.rmw_serialization_format;
@@ -331,6 +334,7 @@ void ProtoRecorder::check_topic_rates(diagnostic_updater::DiagnosticStatusWrappe
   int8_t level = diagnostic_msgs::msg::DiagnosticStatus::OK;
   std::string message = "Topic rates are normal";
   std::vector<std::string> abnormal_topics;
+  bool all_rates_stable = true;
   
   rclcpp::Time now = this->get_clock()->now();
   
@@ -392,8 +396,13 @@ void ProtoRecorder::check_topic_rates(diagnostic_updater::DiagnosticStatusWrappe
       if (info.rate < info.min_rate || info.rate > info.max_rate) {
         level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
         abnormal_topics.push_back(topic_name + " (" + rate_str + " Hz)");
+        all_rates_stable = false;
       }
-    }    
+    } else if (info.message_times.size() < rate_check_window_size_) {
+      // If we don't have enough messages yet and no rate range is specified,
+      // consider the rate unstable
+      all_rates_stable = false;
+    }
   }
   
   // Update summary message if there are abnormal topics
@@ -405,6 +414,13 @@ void ProtoRecorder::check_topic_rates(diagnostic_updater::DiagnosticStatusWrappe
   }
   
   stat.summary(level, message);
+  
+  // If we're waiting for stable rates and all rates are now stable, resume recording
+  if (wait_for_stable_rates_ && all_rates_stable && paused_.load() && all_topics_subscribed_) {
+    RCLCPP_INFO(get_logger(), "All topic rates are now stable. Resuming recording.");
+    wait_for_stable_rates_ = false;  // Don't auto-resume again
+    resume();
+  }
 }
 
 }  // namespace proto_recorder

@@ -98,6 +98,9 @@ private:
   // Diagnostics
   std::unique_ptr<diagnostic_updater::Updater> updater_;
   double diagnostics_period_{1.0};
+
+  // Flag to indicate if we are waiting for stable rates
+  std::atomic<bool> wait_for_stable_rates_{false};
 };
 
 }  // namespace proto_recorder
