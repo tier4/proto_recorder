@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Arguments for proto_recorder -->
+  <arg name="uri" default="proto_recording" description="Output directory for recorded bag"/>
+  <arg name="storage_id" default="mcap" description="Storage plugin to use"/>
+  <arg name="topics" default="" description="List of topics to record (comma-separated)"/>
+  <arg name="all" default="false" description="Record all topics"/>
+  <arg name="serialization_format" default="cdr" description="Serialization format to use"/>
+  <arg name="start_paused" default="false" description="Start recording in paused state"/>
+
+  <!-- Launch the proto_recorder node with parameters -->
+  <node pkg="proto_recorder" exec="proto_recorder_node" name="proto_recorder_node" output="screen">
+    <param name="uri" value="$(var uri)"/>
+    <param name="storage_id" value="$(var storage_id)"/>
+    <param name="topics" value="$(var topics)"/>
+    <param name="all" value="$(var all)"/>
+    <param name="serialization_format" value="$(var serialization_format)"/>
+    <param name="start_paused" value="$(var start_paused)"/>
+  </node>
+</launch>
