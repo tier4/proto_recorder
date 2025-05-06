@@ -195,7 +195,7 @@ std::shared_ptr<rclcpp::GenericSubscription> ProtoRecorder::create_subscription(
     topic_type,
     qos,
     [this, topic_name, topic_type](std::shared_ptr<rclcpp::SerializedMessage> message) {
-      // 全てのトピックが購読されるまで記録を開始しない
+      // Do not start recording until all topics are subscribed
       if (!paused_.load() && all_topics_subscribed_) {
         writer_->write(message, topic_name, topic_type, this->get_clock()->now());
       }
