@@ -3,8 +3,7 @@
   <!-- Arguments for proto_recorder -->
   <arg name="uri" default="proto_recording" description="Output directory for recorded bag"/>
   <arg name="storage_id" default="mcap" description="Storage plugin to use"/>
-  <arg name="topics" default="" description="List of topics to record (comma-separated)"/>
-  <arg name="all" default="false" description="Record all topics"/>
+  <arg name="topics_file" default="$(find-pkg-share proto_recorder)/config/record_topics.yaml" description="Path to YAML file containing topics to record"/>
   <arg name="serialization_format" default="cdr" description="Serialization format to use"/>
   <arg name="start_paused" default="false" description="Start recording in paused state"/>
   
@@ -20,12 +19,16 @@
   <arg name="compression_format" default="" description="Compression format (e.g., 'zstd')"/>
   <arg name="compression_queue_size" default="1" description="Number of files/messages that may be queued for compression"/>
   <arg name="compression_threads" default="0" description="Number of compression threads (0 = number of CPU cores)"/>
+  
+  <!-- Topic rate check arguments -->
+  <arg name="rate_check_window_size" default="10" description="Number of messages to use for rate calculation"/>
+  <arg name="diagnostics_period" default="1.0" description="Period in seconds for publishing diagnostics"/>
 
   <!-- Launch the proto_recorder node with parameters -->
   <node pkg="proto_recorder" exec="proto_recorder_node" name="proto_recorder_node" output="screen">
     <param name="uri" value="$(var uri)"/>
     <param name="storage_id" value="$(var storage_id)"/>
-    <param name="topics" value="$(var topics)"/>
+    <param name="topics_file" value="$(var topics_file)"/>
     <param name="all" value="$(var all)"/>
     <param name="serialization_format" value="$(var serialization_format)"/>
     <param name="start_paused" value="$(var start_paused)"/>
@@ -42,5 +45,9 @@
     <param name="compression_format" value="$(var compression_format)"/>
     <param name="compression_queue_size" value="$(var compression_queue_size)"/>
     <param name="compression_threads" value="$(var compression_threads)"/>
+    
+    <!-- Topic rate check parameters -->
+    <param name="rate_check_window_size" value="$(var rate_check_window_size)"/>
+    <param name="diagnostics_period" value="$(var diagnostics_period)"/>
   </node>
 </launch>

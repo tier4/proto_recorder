@@ -4,12 +4,14 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <fstream>
 
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/serialization.hpp"
 #include "rosbag2_cpp/writer.hpp"
 #include "rosbag2_storage/topic_metadata.hpp"
 #include "rosbag2_transport/reader_writer_factory.hpp"
+#include "yaml-cpp/yaml.h"
 
 namespace proto_recorder
 {
@@ -28,7 +30,12 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   storage_options_.storage_preset_profile = declare_parameter<std::string>("storage_preset_profile", "");
   storage_options_.storage_config_uri = declare_parameter<std::string>("storage_config_uri", "");
   
-  record_options_.topics = declare_parameter<std::vector<std::string>>("topics");
+  // Get topics from parameter or file
+  auto topics_file = declare_parameter<std::string>("topics_file", "");
+  if (!topics_file.empty()) {
+    record_options_.topics = load_topics_from_file(topics_file);
+  }
+  
   record_options_.rmw_serialization_format = declare_parameter<std::string>("serialization_format", "cdr");
   record_options_.start_paused = declare_parameter<bool>("start_paused", false);
   
@@ -38,6 +45,10 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   record_options_.compression_queue_size = static_cast<uint64_t>(declare_parameter<int64_t>("compression_queue_size", 1));
   record_options_.compression_threads = static_cast<uint64_t>(declare_parameter<int64_t>("compression_threads", 0));
   
+  // Topic rate check parameters
+  rate_check_window_size_ = static_cast<size_t>(declare_parameter<int64_t>("rate_check_window_size", 10));
+  diagnostics_period_ = declare_parameter<double>("diagnostics_period", 1.0);
+  
   // Initialize writer
   writer_ = std::make_shared<rosbag2_cpp::Writer>();
   
@@ -46,6 +57,12 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   
   // Set serialization format
   serialization_format_ = record_options_.rmw_serialization_format;
+  
+  // Initialize diagnostics updater
+  updater_ = std::make_unique<diagnostic_updater::Updater>(this);
+  updater_->setHardwareID("proto_recorder");
+  updater_->add("topic_rates", std::bind(&ProtoRecorder::check_topic_rates, this, std::placeholders::_1));
+  
   
   RCLCPP_INFO(
     this->get_logger(),
@@ -73,6 +90,30 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
 ProtoRecorder::~ProtoRecorder()
 {
   stop();
+}
+
+std::vector<std::string> ProtoRecorder::load_topics_from_file(const std::string & file_path)
+{
+  std::vector<std::string> topics;
+  
+  try {
+    RCLCPP_INFO(get_logger(), "Loading topics from file: %s", file_path.c_str());
+    YAML::Node config = YAML::LoadFile(file_path);
+    
+    if (config["topics"]) {
+      for (const auto & topic : config["topics"]) {
+        if (topic["name"]) {
+          std::string topic_name = topic["name"].as<std::string>();
+          topics.push_back(topic_name);
+          RCLCPP_INFO(get_logger(), "Added topic from file: %s", topic_name.c_str());
+        }
+      }
+    }
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(get_logger(), "Error loading topics from file: %s", e.what());
+  }
+  
+  return topics;
 }
 
 void ProtoRecorder::record()
@@ -168,6 +209,10 @@ void ProtoRecorder::subscribe_topic(const std::string & topic_name, const std::s
   // Create topic in writer
   writer_->create_topic(topic_metadata);
   
+  // Initialize topic info for rate checking
+  topic_info_[topic_name].name = topic_name;
+  topic_info_[topic_name].type = topic_type;
+  
   // Create subscription with default QoS
   auto subscription = create_subscription(topic_name, topic_type, rclcpp::QoS(10));
   
@@ -195,6 +240,9 @@ std::shared_ptr<rclcpp::GenericSubscription> ProtoRecorder::create_subscription(
     topic_type,
     qos,
     [this, topic_name, topic_type](std::shared_ptr<rclcpp::SerializedMessage> message) {
+      // Update topic rate statistics
+      update_topic_rate(topic_name, this->get_clock()->now());
+      
       // Do not start recording until all topics are subscribed
       if (!paused_.load() && all_topics_subscribed_) {
         writer_->write(message, topic_name, topic_type, this->get_clock()->now());
@@ -251,6 +299,100 @@ void ProtoRecorder::retry_topics()
       topic_retry_timer_->cancel();
     }
   }
+}
+
+void ProtoRecorder::update_topic_rate(const std::string & topic_name, const rclcpp::Time & now)
+{
+  auto & info = topic_info_[topic_name];
+  std::lock_guard<std::mutex> lock(info.mutex);
+  
+  // 単にタイムスタンプを記録するだけ
+  info.message_times.push_back(now);
+  
+  // ウィンドウサイズを超えないように古いタイムスタンプを削除
+  while (info.message_times.size() > rate_check_window_size_) {
+    info.message_times.pop_front();
+  }
+  
+  // レートの計算はcheck_topic_ratesで行う
+}
+
+void ProtoRecorder::check_topic_rates(diagnostic_updater::DiagnosticStatusWrapper & stat)
+{
+  int8_t level = diagnostic_msgs::msg::DiagnosticStatus::OK;
+  std::string message = "Topic rates are normal";
+  
+  rclcpp::Time now = this->get_clock()->now();
+  
+  // すべてのサブスクライブ対象トピックを確認
+  for (const auto & topic_entry : record_options_.topics) {
+    // トピック名を取得
+    const std::string & topic_name = topic_entry;
+    
+    // topic_info_にトピックが存在しない場合は初期化
+    if (topic_info_.find(topic_name) == topic_info_.end()) {
+      topic_info_[topic_name].name = topic_name;
+      // typeは不明なので空文字列
+      topic_info_[topic_name].type = "";
+    }
+    
+    TopicInfo & info = topic_info_[topic_name];
+    std::lock_guard<std::mutex> lock(info.mutex);
+    
+    // 前回のチェックから診断期間以上経過している場合にのみレートを再計算
+    if (info.last_checked_time.nanoseconds() == 0 || 
+        (now - info.last_checked_time).seconds() >= diagnostics_period_) {
+      
+      // メッセージが2つ以上あればレートを計算
+      if (info.message_times.size() >= 2) {
+        auto oldest = info.message_times.front();
+        auto newest = info.message_times.back();
+        double duration = (newest - oldest).seconds();
+        
+        if (duration > 0.0) {
+          // 計算: (メッセージ数 - 1) / 期間
+          info.rate = static_cast<double>(info.message_times.size() - 1) / duration;
+        }
+        
+        // 最後のメッセージから現在までの時間が長すぎる場合、レートを下げる
+        double time_since_last_msg = (now - newest).seconds();
+        if (time_since_last_msg > diagnostics_period_) {
+          // 最後のメッセージからの経過時間に基づいてレートを調整
+          // 例: 最後のメッセージから2秒経過していれば、レートを半分に
+          double decay_factor = diagnostics_period_ / time_since_last_msg;
+          info.rate *= decay_factor;
+        }
+      } else if (info.message_times.size() == 1) {
+        // メッセージが1つしかない場合
+        double time_since_msg = (now - info.message_times.front()).seconds();
+        if (time_since_msg > 0.0) {
+          // 1メッセージ / 経過時間 (ただし時間が長すぎる場合は0に近づく)
+          info.rate = 1.0 / std::max(time_since_msg, diagnostics_period_);
+        } else {
+          info.rate = 0.0;
+        }
+      } else {
+        // メッセージがない場合
+        info.rate = 0.0;
+      }
+      
+      // 最後にチェックした時刻を更新
+      info.last_checked_time = now;
+    }
+    
+    // 各トピックごとに個別の診断項目として追加
+    std::string rate_str = std::to_string(info.rate);
+    rate_str = rate_str.substr(0, rate_str.find(".") + 3); // 小数点以下2桁まで
+    stat.add(topic_name, rate_str);
+    
+    // 必要に応じてしきい値チェックを追加
+    // if (info.rate < some_threshold) {
+    //   level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
+    //   message = "Some topics have low rates";
+    // }
+  }
+  
+  stat.summary(level, message);
 }
 
 }  // namespace proto_recorder

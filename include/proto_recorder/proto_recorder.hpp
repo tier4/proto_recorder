@@ -5,14 +5,26 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <deque>
+#include <mutex>
 
-#include "rclcpp/rclcpp.hpp"
-#include "rosbag2_cpp/writer.hpp"
-#include "rosbag2_storage/storage_options.hpp"
-#include "rosbag2_transport/record_options.hpp"
+#include <rclcpp/rclcpp.hpp>
+#include <rosbag2_cpp/writer.hpp>
+#include <rosbag2_storage/storage_options.hpp>
+#include <rosbag2_transport/record_options.hpp>
+#include <diagnostic_updater/diagnostic_updater.hpp>
 
 namespace proto_recorder
 {
+
+struct TopicInfo {
+  std::string name;
+  std::string type;
+  std::deque<rclcpp::Time> message_times;
+  std::mutex mutex;
+  double rate{0.0};
+  rclcpp::Time last_checked_time;  // 最後にレートをチェックした時刻
+};
 
 class ProtoRecorder : public rclcpp::Node
 {
@@ -39,6 +51,9 @@ public:
   bool is_paused() const;
 
 private:
+  // Load topics from YAML file
+  std::vector<std::string> load_topics_from_file(const std::string & file_path);
+  
   // Subscribe to topics
   void subscribe_topics(const std::vector<std::string> & topics);
   
@@ -54,7 +69,13 @@ private:
 
   // Retry subscribing to topics
   void retry_topics();
-
+  
+  // Update topic rate statistics
+  void update_topic_rate(const std::string & topic_name, const rclcpp::Time & now);
+  
+  // Diagnostics callback
+  void check_topic_rates(diagnostic_updater::DiagnosticStatusWrapper & stat);
+  
   // Member variables
   std::shared_ptr<rosbag2_cpp::Writer> writer_;
   rosbag2_storage::StorageOptions storage_options_;
@@ -68,6 +89,14 @@ private:
   
   // Flag to indicate if all topics are subscribed
   std::atomic<bool> all_topics_subscribed_{false};
+  
+  // Topic rate checking
+  std::unordered_map<std::string, TopicInfo> topic_info_;
+  size_t rate_check_window_size_{10};
+  
+  // Diagnostics
+  std::unique_ptr<diagnostic_updater::Updater> updater_;
+  double diagnostics_period_{1.0};
 };
 
 }  // namespace proto_recorder

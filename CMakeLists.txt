@@ -6,12 +6,8 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # find dependencies
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(rclcpp_components REQUIRED)
-find_package(rosbag2_cpp REQUIRED)
-find_package(rosbag2_storage REQUIRED)
-find_package(rosbag2_transport REQUIRED)
+find_package(ament_cmake_auto REQUIRED)
+ament_auto_find_build_dependencies()
 
 include_directories(include)
 
@@ -29,6 +25,8 @@ ament_target_dependencies(proto_recorder
   rosbag2_cpp
   rosbag2_storage
   rosbag2_transport
+  diagnostic_updater
+  yaml-cpp
 )
 
 # Register the component
@@ -63,6 +61,11 @@ install(
 install(
   DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
+)
+
+install(
+  DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}/config
 )
 
 if(BUILD_TESTING)

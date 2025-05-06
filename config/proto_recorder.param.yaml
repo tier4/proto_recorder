@@ -1,0 +1,31 @@
+/**:
+  ros__parameters:
+    # Storage configuration
+    storage_id: "mcap" # Storage plugin to use (sqlite3, mcap, etc.)
+    uri: "proto_recording" # Output directory for recorded bag
+
+    # Bag splitting options
+    max_bagfile_size: 0 # Maximum size in bytes before splitting (0 = no splitting)
+    max_bagfile_duration: 0 # Maximum duration in seconds before splitting (0 = no splitting)
+    max_cache_size: 0 # Maximum cache size in bytes (0 = no caching)
+
+    # Storage configuration
+    storage_preset_profile: "" # Storage preset profile (e.g., "fastwrite", "zstd_fast", "zstd_small" for MCAP)
+    storage_config_uri: "" # Path to storage configuration YAML file
+
+    # Compression options
+    compression_mode: "" # Compression mode ("none", "file", "message")
+    compression_format: "" # Compression format (e.g., "zstd")
+    compression_queue_size: 1 # Number of files/messages that may be queued for compression
+    compression_threads: 0 # Number of compression threads (0 = number of CPU cores)
+
+    # Topic selection
+    topics_file: "" # Path to YAML file containing topics to record
+
+    # Recording options
+    serialization_format: "cdr" # Serialization format to use
+    start_paused: false # Start recording in paused state
+
+    # Topic rate check options
+    rate_check_window_size: 10 # Number of messages to use for rate calculation
+    diagnostics_period: 1.0 # Period in seconds for publishing diagnostics
