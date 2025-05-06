@@ -4,14 +4,10 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <fstream>
 
-#include "rclcpp/rclcpp.hpp"
-#include "rclcpp/serialization.hpp"
-#include "rosbag2_cpp/writer.hpp"
-#include "rosbag2_storage/topic_metadata.hpp"
-#include "rosbag2_transport/reader_writer_factory.hpp"
-#include "yaml-cpp/yaml.h"
+#include <rosbag2_cpp/writer.hpp>
+#include <rosbag2_storage/topic_metadata.hpp>
+#include <yaml-cpp/yaml.h>
 
 namespace proto_recorder
 {
@@ -195,7 +191,6 @@ void ProtoRecorder::subscribe_topics(const std::vector<std::string> & topics)
 {
   // Fetch topic names and types once
   auto topics_and_types = fetch_topic_names_and_types();
-  RCLCPP_INFO(get_logger(), "Successfully got topic names and types");
   
   for (const auto & topic : topics) {
     RCLCPP_INFO(get_logger(), "Subscribing to topic: %s", topic.c_str());
@@ -265,7 +260,6 @@ std::shared_ptr<rclcpp::GenericSubscription> ProtoRecorder::create_subscription(
 
 std::unordered_map<std::string, std::string> ProtoRecorder::fetch_topic_names_and_types()
 {
-  RCLCPP_INFO(get_logger(), "Getting topic names and types");
   std::unordered_map<std::string, std::string> topics_and_types;
   
   // Use the Node's method to get topic names and types
@@ -274,18 +268,13 @@ std::unordered_map<std::string, std::string> ProtoRecorder::fetch_topic_names_an
   for (const auto & topic_name_and_types : topic_names_and_types) {
     const auto & topic_name = topic_name_and_types.first;
     const auto & type_names = topic_name_and_types.second;
-    
-    RCLCPP_INFO(get_logger(), "Topic name: %s, Type count: %zu", 
-                topic_name.c_str(), type_names.size());
-    
+        
     if (type_names.empty() || type_names.size() > 1) {
       continue;
     }
     
     topics_and_types[topic_name] = type_names[0];
-    RCLCPP_INFO(get_logger(), "Topic name: %s, Type: %s", topic_name.c_str(), type_names[0].c_str());
   }
-  RCLCPP_INFO(get_logger(), "Topics and types: %zu", topics_and_types.size());
   return topics_and_types;
 }
 
