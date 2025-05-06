@@ -306,15 +306,15 @@ void ProtoRecorder::update_topic_rate(const std::string & topic_name, const rclc
   auto & info = topic_info_[topic_name];
   std::lock_guard<std::mutex> lock(info.mutex);
   
-  // 単にタイムスタンプを記録するだけ
+  // Only record the timestamp
   info.message_times.push_back(now);
   
-  // ウィンドウサイズを超えないように古いタイムスタンプを削除
+  // Remove old timestamps to keep within window size
   while (info.message_times.size() > rate_check_window_size_) {
     info.message_times.pop_front();
   }
   
-  // レートの計算はcheck_topic_ratesで行う
+  // Rate calculation is done in check_topic_rates
 }
 
 void ProtoRecorder::check_topic_rates(diagnostic_updater::DiagnosticStatusWrapper & stat)
@@ -324,61 +324,53 @@ void ProtoRecorder::check_topic_rates(diagnostic_updater::DiagnosticStatusWrappe
   
   rclcpp::Time now = this->get_clock()->now();
   
-  // すべてのサブスクライブ対象トピックを確認
+  // Check all subscribed topics
   for (const auto & topic_entry : record_options_.topics) {
-    // トピック名を取得
+    // Get topic name
     const std::string & topic_name = topic_entry;
     
-    // topic_info_にトピックが存在しない場合は初期化
+    // Initialize topic_info_ if the topic doesn't exist
     if (topic_info_.find(topic_name) == topic_info_.end()) {
       topic_info_[topic_name].name = topic_name;
-      // typeは不明なので空文字列
+      // Type is unknown, so empty string
       topic_info_[topic_name].type = "";
     }
     
     TopicInfo & info = topic_info_[topic_name];
     std::lock_guard<std::mutex> lock(info.mutex);
-    
-    // 前回のチェックから診断期間以上経過している場合にのみレートを再計算
-    if (info.last_checked_time.nanoseconds() == 0 || 
-        (now - info.last_checked_time).seconds() >= diagnostics_period_) {
+          
+    // Calculate rate if there are at least 2 messages
+    if (info.message_times.size() >= 2) {
+      auto oldest = info.message_times.front();
+      auto newest = info.message_times.back();
+      double duration = (newest - oldest).seconds();
       
-      // メッセージが2つ以上あればレートを計算
-      if (info.message_times.size() >= 2) {
-        auto oldest = info.message_times.front();
-        auto newest = info.message_times.back();
-        double duration = (newest - oldest).seconds();
-        
-        if (duration > 0.0) {
-          // 計算: (メッセージ数 - 1) / 期間
-          info.rate = static_cast<double>(info.message_times.size() - 1) / duration;
-        }
-        
-        // 最後のメッセージから現在までの時間が長すぎる場合、レートを下げる
-        double time_since_last_msg = (now - newest).seconds();
-        if (time_since_last_msg > diagnostics_period_) {
-          // 最後のメッセージからの経過時間に基づいてレートを調整
-          // 例: 最後のメッセージから2秒経過していれば、レートを半分に
-          double decay_factor = diagnostics_period_ / time_since_last_msg;
-          info.rate *= decay_factor;
-        }
-      } else if (info.message_times.size() == 1) {
-        // メッセージが1つしかない場合
-        double time_since_msg = (now - info.message_times.front()).seconds();
-        if (time_since_msg > 0.0) {
-          // 1メッセージ / 経過時間 (ただし時間が長すぎる場合は0に近づく)
-          info.rate = 1.0 / std::max(time_since_msg, diagnostics_period_);
-        } else {
-          info.rate = 0.0;
-        }
-      } else {
-        // メッセージがない場合
-        info.rate = 0.0;
+      if (duration > 0.0) {
+        // Calculation: (message count - 1) / duration
+        info.rate = static_cast<double>(info.message_times.size() - 1) / duration;
       }
       
-      // 最後にチェックした時刻を更新
-      info.last_checked_time = now;
-    }
+      // If too much time has passed since the last message, reduce the rate
+      double time_since_last_msg = (now - newest).seconds();
+      if (time_since_last_msg > diagnostics_period_) {
+        // Adjust rate based on time elapsed since last message
+        // Example: If 2 seconds have passed since the last message, halve the rate
+        double decay_factor = diagnostics_period_ / time_since_last_msg;
+        info.rate *= decay_factor;
+      }
+    } else if (info.message_times.size() == 1) {
+      // If there's only one message
+      double time_since_msg = (now - info.message_times.front()).seconds();
+      if (time_since_msg > 0.0) {
+        // 1 message / elapsed time (approaches 0 if time is too long)
+        info.rate = 1.0 / std::max(time_since_msg, diagnostics_period_);
+      } else {
+        info.rate = 0.0;
+      }
+    } else {
+      // No messages
+      info.rate = 0.0;
+    } 
     
     // 各トピックごとに個別の診断項目として追加
     std::string rate_str = std::to_string(info.rate);

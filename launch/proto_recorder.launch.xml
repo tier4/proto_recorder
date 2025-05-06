@@ -22,14 +22,13 @@
   
   <!-- Topic rate check arguments -->
   <arg name="rate_check_window_size" default="10" description="Number of messages to use for rate calculation"/>
-  <arg name="diagnostics_period" default="1.0" description="Period in seconds for publishing diagnostics"/>
+  <arg name="diagnostics_period" default="5.0" description="Period in seconds for publishing diagnostics"/>
 
   <!-- Launch the proto_recorder node with parameters -->
   <node pkg="proto_recorder" exec="proto_recorder_node" name="proto_recorder_node" output="screen">
     <param name="uri" value="$(var uri)"/>
     <param name="storage_id" value="$(var storage_id)"/>
     <param name="topics_file" value="$(var topics_file)"/>
-    <param name="all" value="$(var all)"/>
     <param name="serialization_format" value="$(var serialization_format)"/>
     <param name="start_paused" value="$(var start_paused)"/>
     

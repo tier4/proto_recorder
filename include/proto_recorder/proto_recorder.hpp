@@ -23,7 +23,6 @@ struct TopicInfo {
   std::deque<rclcpp::Time> message_times;
   std::mutex mutex;
   double rate{0.0};
-  rclcpp::Time last_checked_time;  // 最後にレートをチェックした時刻
 };
 
 class ProtoRecorder : public rclcpp::Node
