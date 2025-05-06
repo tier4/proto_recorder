@@ -21,10 +21,23 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   storage_options_.storage_id = declare_parameter<std::string>("storage_id", "mcap");
   storage_options_.uri = declare_parameter<std::string>("uri", "proto_recording");
   
+  // Add storage configuration parameters - use int64_t instead of uint64_t to avoid ambiguity
+  storage_options_.max_bagfile_size = static_cast<uint64_t>(declare_parameter<int64_t>("max_bagfile_size", 0));
+  storage_options_.max_bagfile_duration = static_cast<uint64_t>(declare_parameter<int64_t>("max_bagfile_duration", 0));
+  storage_options_.max_cache_size = static_cast<uint64_t>(declare_parameter<int64_t>("max_cache_size", 0));
+  storage_options_.storage_preset_profile = declare_parameter<std::string>("storage_preset_profile", "");
+  storage_options_.storage_config_uri = declare_parameter<std::string>("storage_config_uri", "");
+  
   record_options_.topics = declare_parameter<std::vector<std::string>>("topics");
   record_options_.rmw_serialization_format = declare_parameter<std::string>("serialization_format", "cdr");
   record_options_.start_paused = declare_parameter<bool>("start_paused", false);
-    
+  
+  // Add compression options - use int64_t for numeric parameters
+  record_options_.compression_mode = declare_parameter<std::string>("compression_mode", "");
+  record_options_.compression_format = declare_parameter<std::string>("compression_format", "");
+  record_options_.compression_queue_size = static_cast<uint64_t>(declare_parameter<int64_t>("compression_queue_size", 1));
+  record_options_.compression_threads = static_cast<uint64_t>(declare_parameter<int64_t>("compression_threads", 0));
+  
   // Initialize writer
   writer_ = std::make_shared<rosbag2_cpp::Writer>();
   
@@ -39,6 +52,21 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
     "Initialized ProtoRecorder with storage_id: %s, uri: %s",
     storage_options_.storage_id.c_str(),
     storage_options_.uri.c_str());
+    
+  if (!storage_options_.storage_config_uri.empty()) {
+    RCLCPP_INFO(
+      this->get_logger(),
+      "Using storage configuration file: %s",
+      storage_options_.storage_config_uri.c_str());
+  }
+  
+  if (!storage_options_.storage_preset_profile.empty()) {
+    RCLCPP_INFO(
+      this->get_logger(),
+      "Using storage preset profile: %s",
+      storage_options_.storage_preset_profile.c_str());
+  }
+  
   record();
 }
 
