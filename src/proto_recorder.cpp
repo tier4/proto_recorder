@@ -220,16 +220,21 @@ void ProtoRecorder::subscribe_topic(const std::string & topic_name, const std::s
   topic_info_[topic_name].name = topic_name;
   topic_info_[topic_name].type = topic_type;
   
-  // Create subscription with default QoS
-  auto subscription = create_subscription(topic_name, topic_type, rclcpp::QoS(10));
+  // Get appropriate QoS for this topic
+  auto qos = get_subscription_qos_for_topic(topic_name);
+  
+  // Create subscription with adapted QoS
+  auto subscription = create_subscription(topic_name, topic_type, qos);
   
   if (subscription) {
     subscriptions_[topic_name] = subscription;
     RCLCPP_INFO(
       get_logger(),
-      "Subscribed to topic '%s' with type '%s'",
+      "Subscribed to topic '%s' with type '%s' using %s reliability and %s durability",
       topic_name.c_str(),
-      topic_type.c_str());
+      topic_type.c_str(),
+      qos.get_rmw_qos_profile().reliability == RMW_QOS_POLICY_RELIABILITY_RELIABLE ? "RELIABLE" : "BEST_EFFORT",
+      qos.get_rmw_qos_profile().durability == RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL ? "TRANSIENT_LOCAL" : "VOLATILE");
   } else {
     writer_->remove_topic(topic_metadata);
     RCLCPP_ERROR(
@@ -410,6 +415,84 @@ void ProtoRecorder::check_topic_rates(diagnostic_updater::DiagnosticStatusWrappe
     wait_for_stable_rates_ = false;  // Don't auto-resume again
     resume();
   }
+}
+
+rclcpp::QoS ProtoRecorder::get_subscription_qos_for_topic(const std::string & topic_name)
+{
+  // Adapt to publisher QoS
+  return adapt_qos_to_publishers(topic_name);
+}
+
+rclcpp::QoS ProtoRecorder::adapt_qos_to_publishers(const std::string & topic_name)
+{
+  auto publishers_info = this->get_publishers_info_by_topic(topic_name);
+  
+  // Always initialize with a depth value (10 is a common default)
+  rclcpp::QoS adapted_qos(10);
+  
+  if (publishers_info.empty()) {
+    RCLCPP_INFO_STREAM(
+      this->get_logger(),
+      "No publishers found for topic " << topic_name << ", using default QoS");
+    return adapted_qos;  // Return the default QoS we just created
+  }
+  
+  // Count publishers with different QoS policies
+  size_t num_publishers = publishers_info.size();
+  size_t reliable_publishers = 0;
+  size_t transient_local_publishers = 0;
+  
+  for (const auto & info : publishers_info) {
+    const auto & profile = info.qos_profile().get_rmw_qos_profile();
+    if (profile.reliability == RMW_QOS_POLICY_RELIABILITY_RELIABLE) {
+      reliable_publishers++;
+    }
+    if (profile.durability == RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL) {
+      transient_local_publishers++;
+    }
+  }
+  
+  // Set reliability policy
+  if (reliable_publishers == num_publishers) {
+    adapted_qos.reliable();
+    RCLCPP_INFO_STREAM(
+      this->get_logger(),
+      "All publishers for topic " << topic_name << " use RELIABLE QoS, matching");
+  } else {
+    adapted_qos.best_effort();
+    if (reliable_publishers > 0) {
+      RCLCPP_WARN_STREAM(
+        this->get_logger(),
+        "Mixed reliability for publishers on topic " << topic_name << 
+        ". Using BEST_EFFORT to connect to all publishers, but may miss messages from RELIABLE publishers");
+    } else {
+      RCLCPP_INFO_STREAM(
+        this->get_logger(),
+        "All publishers for topic " << topic_name << " use BEST_EFFORT QoS, matching");
+    }
+  }
+  
+  // Set durability policy
+  if (transient_local_publishers == num_publishers) {
+    adapted_qos.transient_local();
+    RCLCPP_INFO_STREAM(
+      this->get_logger(),
+      "All publishers for topic " << topic_name << " use TRANSIENT_LOCAL QoS, matching");
+  } else {
+    adapted_qos.durability_volatile();
+    if (transient_local_publishers > 0) {
+      RCLCPP_WARN_STREAM(
+        this->get_logger(),
+        "Mixed durability for publishers on topic " << topic_name << 
+        ". Using VOLATILE to connect to all publishers, but will not receive latched messages");
+    } else {
+      RCLCPP_INFO_STREAM(
+        this->get_logger(),
+        "All publishers for topic " << topic_name << " use VOLATILE QoS, matching");
+    }
+  }
+  
+  return adapted_qos;
 }
 
 }  // namespace proto_recorder

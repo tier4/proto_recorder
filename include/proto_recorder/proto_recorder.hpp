@@ -101,6 +101,9 @@ private:
 
   // Flag to indicate if we are waiting for stable rates
   std::atomic<bool> wait_for_stable_rates_{false};
+
+  rclcpp::QoS get_subscription_qos_for_topic(const std::string & topic_name);
+  rclcpp::QoS adapt_qos_to_publishers(const std::string & topic_name);
 };
 
 }  // namespace proto_recorder
