@@ -106,6 +106,15 @@ std::vector<std::string> ProtoRecorder::load_topics_from_file(const std::string 
           std::string topic_name = topic["name"].as<std::string>();
           topics.push_back(topic_name);
           RCLCPP_INFO(get_logger(), "Added topic from file: %s", topic_name.c_str());
+          
+          // Load hz_range if available
+          if (topic["hz_range"] && topic["hz_range"].IsSequence() && topic["hz_range"].size() == 2) {
+            double min_rate = topic["hz_range"][0].as<double>();
+            double max_rate = topic["hz_range"][1].as<double>();
+            topic_info_[topic_name].min_rate = min_rate;
+            topic_info_[topic_name].max_rate = max_rate;
+            RCLCPP_INFO(get_logger(), "  Rate range: %.1f - %.1f Hz", min_rate, max_rate);
+          }
         }
       }
     }
@@ -321,6 +330,7 @@ void ProtoRecorder::check_topic_rates(diagnostic_updater::DiagnosticStatusWrappe
 {
   int8_t level = diagnostic_msgs::msg::DiagnosticStatus::OK;
   std::string message = "Topic rates are normal";
+  std::vector<std::string> abnormal_topics;
   
   rclcpp::Time now = this->get_clock()->now();
   
@@ -372,16 +382,26 @@ void ProtoRecorder::check_topic_rates(diagnostic_updater::DiagnosticStatusWrappe
       info.rate = 0.0;
     } 
     
-    // 各トピックごとに個別の診断項目として追加
+    // Format rate string with 2 decimal places
     std::string rate_str = std::to_string(info.rate);
     rate_str = rate_str.substr(0, rate_str.find(".") + 3); // 小数点以下2桁まで
     stat.add(topic_name, rate_str);
     
-    // 必要に応じてしきい値チェックを追加
-    // if (info.rate < some_threshold) {
-    //   level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
-    //   message = "Some topics have low rates";
-    // }
+    // Check if rate is within expected range
+    if (info.min_rate > 0.0 && info.max_rate > 0.0) {
+      if (info.rate < info.min_rate || info.rate > info.max_rate) {
+        level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
+        abnormal_topics.push_back(topic_name + " (" + rate_str + " Hz)");
+      }
+    }    
+  }
+  
+  // Update summary message if there are abnormal topics
+  if (!abnormal_topics.empty()) {
+    message = "Abnormal rates for topics: " + abnormal_topics[0];
+    for (size_t i = 1; i < abnormal_topics.size(); ++i) {
+      message += ", " + abnormal_topics[i];
+    }
   }
   
   stat.summary(level, message);

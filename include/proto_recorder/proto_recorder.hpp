@@ -23,6 +23,8 @@ struct TopicInfo {
   std::deque<rclcpp::Time> message_times;
   std::mutex mutex;
   double rate{0.0};
+  double min_rate{0.0};  // Minimum expected rate in Hz
+  double max_rate{0.0};  // Maximum expected rate in Hz
 };
 
 class ProtoRecorder : public rclcpp::Node
