@@ -17,23 +17,14 @@ namespace proto_recorder
 ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
 : rclcpp::Node("proto_recorder", options)
 {
-  // Declare parameters
-  this->declare_parameter("storage_id", "sqlite3");
-  this->declare_parameter("uri", "proto_recording");
-  this->declare_parameter("topics", std::vector<std::string>{});
-  this->declare_parameter("all", false);
-  this->declare_parameter("serialization_format", "cdr");
-  this->declare_parameter("start_paused", false);
-
-  // Get parameters
-  storage_options_.storage_id = this->get_parameter("storage_id").as_string();
-  storage_options_.uri = this->get_parameter("uri").as_string();
+  // Declare parameters and get values in one step
+  storage_options_.storage_id = declare_parameter<std::string>("storage_id", "mcap");
+  storage_options_.uri = declare_parameter<std::string>("uri", "proto_recording");
   
-  record_options_.topics = this->get_parameter("topics").as_string_array();
-  record_options_.all = this->get_parameter("all").as_bool();
-  record_options_.rmw_serialization_format = this->get_parameter("serialization_format").as_string();
-  record_options_.start_paused = this->get_parameter("start_paused").as_bool();
-  
+  record_options_.topics = declare_parameter<std::vector<std::string>>("topics");
+  record_options_.rmw_serialization_format = declare_parameter<std::string>("serialization_format", "cdr");
+  record_options_.start_paused = declare_parameter<bool>("start_paused", false);
+    
   // Initialize writer
   writer_ = std::make_shared<rosbag2_cpp::Writer>();
   
