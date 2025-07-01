@@ -49,6 +49,9 @@ public:
   // Resume recording (clears paused_ flag)
   void resume();
 
+  // Initialize subscriptions (called once from constructor)
+  void initialize_subscriptions();
+
 
   // Check if recording is paused
   bool is_paused() const;
@@ -113,6 +116,9 @@ private:
   
   // Original URI prefix (without timestamp)
   std::string original_uri_prefix_;
+  
+  // Flag to indicate if subscriptions have been initialized
+  std::atomic<bool> subscriptions_initialized_{false};
 
   // Generate timestamped URI
   std::string generate_timestamped_uri(const std::string & prefix);

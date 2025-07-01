@@ -101,6 +101,9 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
     rclcpp::QoS(1).transient_local(),
     std::bind(&ProtoRecorder::on_pause, this, std::placeholders::_1));
 
+  // Initialize subscriptions once
+  initialize_subscriptions();
+  
   start();
 }
 
@@ -161,19 +164,20 @@ void ProtoRecorder::start()
   RCLCPP_INFO(get_logger(), "Opening writer with URI: %s, serialization format: %s", 
               storage_options_.uri.c_str(), record_options_.rmw_serialization_format.c_str());
   
+  // Create new writer instance
+  writer_ = std::make_shared<rosbag2_cpp::Writer>();
   writer_->open(
     storage_options_,
     {rmw_get_serialization_format(), record_options_.rmw_serialization_format});
 
-  if (!record_options_.topics.empty()) {
-    RCLCPP_INFO(get_logger(), "Subscribing to specified topics");
-    subscribe_topics(record_options_.topics);
-    
-    topic_retry_timer_ = this->create_wall_timer(
-      std::chrono::seconds(1),
-      std::bind(&ProtoRecorder::retry_topics, this));
-  } else {
-    RCLCPP_WARN(get_logger(), "No topics specified for recording.");
+  // Re-create topics in the new writer
+  for (const auto & [topic_name, subscription] : subscriptions_) {
+    auto & info = topic_info_[topic_name];
+    rosbag2_storage::TopicMetadata topic_metadata;
+    topic_metadata.name = topic_name;
+    topic_metadata.type = info.type;
+    topic_metadata.serialization_format = serialization_format_;
+    writer_->create_topic(topic_metadata);
   }
 
   is_recording_.store(true);
@@ -189,19 +193,13 @@ void ProtoRecorder::stop()
   
   RCLCPP_INFO(get_logger(), "Stopping recording...");
   
-  // Cancel timer if it exists
-  if (topic_retry_timer_) {
-    topic_retry_timer_->cancel();
-  }
-  
-  subscriptions_.clear();
   if (writer_) {
     writer_->close();
+    writer_.reset();
   }
   
   is_recording_.store(false);
   paused_.store(false);  // Reset paused state
-  all_topics_subscribed_.store(false);  // Reset subscription state
   
   RCLCPP_INFO(get_logger(), "Recording stopped.");
 }
@@ -586,6 +584,26 @@ void ProtoRecorder::on_pause(const std_msgs::msg::Bool::SharedPtr msg)
   } else if (!msg->data && is_paused()) {
     resume();
   }
+}
+
+void ProtoRecorder::initialize_subscriptions()
+{
+  if (subscriptions_initialized_.load()) {
+    return;
+  }
+  
+  if (!record_options_.topics.empty()) {
+    RCLCPP_INFO(get_logger(), "Initializing subscriptions to specified topics");
+    subscribe_topics(record_options_.topics);
+    
+    topic_retry_timer_ = this->create_wall_timer(
+      std::chrono::seconds(1),
+      std::bind(&ProtoRecorder::retry_topics, this));
+  } else {
+    RCLCPP_WARN(get_logger(), "No topics specified for recording.");
+  }
+  
+  subscriptions_initialized_.store(true);
 }
 
 }  // namespace proto_recorder
