@@ -49,8 +49,6 @@ public:
   // Resume recording (clears paused_ flag)
   void resume();
 
-  // Start recording (legacy method)
-  void record();
 
   // Check if recording is paused
   bool is_paused() const;
