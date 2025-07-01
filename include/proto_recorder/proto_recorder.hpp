@@ -13,6 +13,7 @@
 #include <rosbag2_storage/storage_options.hpp>
 #include <rosbag2_transport/record_options.hpp>
 #include <diagnostic_updater/diagnostic_updater.hpp>
+#include <std_msgs/msg/bool.hpp>
 
 namespace proto_recorder
 {
@@ -36,17 +37,20 @@ public:
   // Destructor
   virtual ~ProtoRecorder();
 
-  // Start recording
-  void record();
+  // Start recording (initializes writer)
+  void start();
 
-  // Stop recording
+  // Stop recording (closes writer)
   void stop();
 
-  // Pause recording
+  // Pause recording (sets paused_ flag)
   void pause();
 
-  // Resume recording
+  // Resume recording (clears paused_ flag)
   void resume();
+
+  // Start recording (legacy method)
+  void record();
 
   // Check if recording is paused
   bool is_paused() const;
@@ -62,7 +66,7 @@ private:
   void subscribe_topic(const std::string & topic_name, const std::string & topic_type);
   
   // Create a generic subscription
-  std::shared_ptr<rclcpp::GenericSubscription> create_subscription(
+  std::shared_ptr<rclcpp::GenericSubscription> create_generic_topic_subscription(
     const std::string & topic_name, const std::string & topic_type, const rclcpp::QoS & qos);
 
   // Get topic names and types
@@ -101,6 +105,23 @@ private:
 
   // Flag to indicate if we are waiting for stable rates
   std::atomic<bool> wait_for_stable_rates_{false};
+
+  // Control subscriptions
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_stop_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pause_resume_sub_;
+
+  // Recording state
+  std::atomic<bool> is_recording_{false};
+  
+  // Original URI prefix (without timestamp)
+  std::string original_uri_prefix_;
+
+  // Generate timestamped URI
+  std::string generate_timestamped_uri(const std::string & prefix);
+  
+  // Callback functions for control subscriptions
+  void on_start(const std_msgs::msg::Bool::SharedPtr msg);
+  void on_pause(const std_msgs::msg::Bool::SharedPtr msg);
 
   rclcpp::QoS get_subscription_qos_for_topic(const std::string & topic_name);
   rclcpp::QoS adapt_qos_to_publishers(const std::string & topic_name);

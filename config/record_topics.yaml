@@ -1,5 +1,3 @@
 topics:
   - name: /topic1
     hz_range: [18.0, 21.0]
-  - name: /topic2
-    hz_range: [9.0, 11.0]

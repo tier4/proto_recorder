@@ -26,6 +26,7 @@ ament_target_dependencies(proto_recorder
   rosbag2_storage
   rosbag2_transport
   diagnostic_updater
+  std_msgs
   yaml-cpp
 )
 

@@ -4,10 +4,14 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 
 #include <rosbag2_cpp/writer.hpp>
 #include <rosbag2_storage/topic_metadata.hpp>
 #include <yaml-cpp/yaml.h>
+#include <std_msgs/msg/bool.hpp>
 
 namespace proto_recorder
 {
@@ -18,6 +22,9 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   // Declare parameters and get values in one step
   storage_options_.storage_id = declare_parameter<std::string>("storage_id", "mcap");
   storage_options_.uri = declare_parameter<std::string>("uri", "proto_recording");
+  
+  // Save original URI prefix
+  original_uri_prefix_ = storage_options_.uri;
   
   // Add storage configuration parameters - use int64_t instead of uint64_t to avoid ambiguity
   storage_options_.max_bagfile_size = static_cast<uint64_t>(declare_parameter<int64_t>("max_bagfile_size", 0));
@@ -83,6 +90,17 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
       storage_options_.storage_preset_profile.c_str());
   }
   
+  // Create control subscriptions
+  start_stop_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+    "~/input/start",
+    rclcpp::QoS(1).transient_local(),
+    std::bind(&ProtoRecorder::on_start, this, std::placeholders::_1));
+
+  pause_resume_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+    "~/input/pause",
+    rclcpp::QoS(1).transient_local(),
+    std::bind(&ProtoRecorder::on_pause, this, std::placeholders::_1));
+
   record();
 }
 
@@ -124,23 +142,33 @@ std::vector<std::string> ProtoRecorder::load_topics_from_file(const std::string 
   return topics;
 }
 
-void ProtoRecorder::record()
+void ProtoRecorder::start()
 {
-  RCLCPP_INFO(get_logger(), "Recording started.");
+  if (is_recording_.load()) {
+    RCLCPP_WARN(get_logger(), "Recording is already started");
+    return;
+  }
+  
+  RCLCPP_INFO(get_logger(), "Starting recording...");
+  
   if (record_options_.rmw_serialization_format.empty()) {
     throw std::runtime_error("No serialization format specified!");
   }
-  RCLCPP_INFO(get_logger(), "Opening writer with serialization format: %s", record_options_.rmw_serialization_format.c_str());
+  
+  // Generate timestamped URI using original prefix
+  storage_options_.uri = generate_timestamped_uri(original_uri_prefix_);
+  
+  RCLCPP_INFO(get_logger(), "Opening writer with URI: %s, serialization format: %s", 
+              storage_options_.uri.c_str(), record_options_.rmw_serialization_format.c_str());
+  
   writer_->open(
     storage_options_,
     {rmw_get_serialization_format(), record_options_.rmw_serialization_format});
 
   if (!record_options_.topics.empty()) {
     RCLCPP_INFO(get_logger(), "Subscribing to specified topics");
-    // Subscribe to specified topics
     subscribe_topics(record_options_.topics);
     
-    // Start a timer to retry subscribing to topics that weren't found
     topic_retry_timer_ = this->create_wall_timer(
       std::chrono::seconds(1),
       std::bind(&ProtoRecorder::retry_topics, this));
@@ -148,16 +176,30 @@ void ProtoRecorder::record()
     RCLCPP_WARN(get_logger(), "No topics specified for recording.");
   }
 
+  is_recording_.store(true);
+  RCLCPP_INFO(get_logger(), "Recording started.");
+}
+
+void ProtoRecorder::record()
+{
+  // Legacy method - calls start for backward compatibility
+  start();
+  
   if (record_options_.start_paused) {
     RCLCPP_INFO(
       get_logger(), "Recording started but paused. Call resume() to start recording.");
-  } else {
-    RCLCPP_INFO(get_logger(), "Recording started.");
   }
 }
 
 void ProtoRecorder::stop()
 {
+  if (!is_recording_.load()) {
+    RCLCPP_WARN(get_logger(), "Recording is not started");
+    return;
+  }
+  
+  RCLCPP_INFO(get_logger(), "Stopping recording...");
+  
   // Cancel timer if it exists
   if (topic_retry_timer_) {
     topic_retry_timer_->cancel();
@@ -167,17 +209,42 @@ void ProtoRecorder::stop()
   if (writer_) {
     writer_->close();
   }
+  
+  is_recording_.store(false);
+  paused_.store(false);  // Reset paused state
+  all_topics_subscribed_.store(false);  // Reset subscription state
+  
   RCLCPP_INFO(get_logger(), "Recording stopped.");
 }
 
 void ProtoRecorder::pause()
 {
+  if (!is_recording_.load()) {
+    RCLCPP_WARN(get_logger(), "Cannot pause: recording is not started");
+    return;
+  }
+  
+  if (paused_.load()) {
+    RCLCPP_WARN(get_logger(), "Recording is already paused");
+    return;
+  }
+  
   paused_.store(true);
   RCLCPP_INFO(get_logger(), "Recording paused.");
 }
 
 void ProtoRecorder::resume()
 {
+  if (!is_recording_.load()) {
+    RCLCPP_WARN(get_logger(), "Cannot resume: recording is not started");
+    return;
+  }
+  
+  if (!paused_.load()) {
+    RCLCPP_WARN(get_logger(), "Recording is not paused");
+    return;
+  }
+  
   paused_.store(false);
   RCLCPP_INFO(get_logger(), "Recording resumed.");
 }
@@ -224,7 +291,7 @@ void ProtoRecorder::subscribe_topic(const std::string & topic_name, const std::s
   auto qos = get_subscription_qos_for_topic(topic_name);
   
   // Create subscription with adapted QoS
-  auto subscription = create_subscription(topic_name, topic_type, qos);
+  auto subscription = create_generic_topic_subscription(topic_name, topic_type, qos);
   
   if (subscription) {
     subscriptions_[topic_name] = subscription;
@@ -244,7 +311,7 @@ void ProtoRecorder::subscribe_topic(const std::string & topic_name, const std::s
   }
 }
 
-std::shared_ptr<rclcpp::GenericSubscription> ProtoRecorder::create_subscription(
+std::shared_ptr<rclcpp::GenericSubscription> ProtoRecorder::create_generic_topic_subscription(
   const std::string & topic_name, const std::string & topic_type, const rclcpp::QoS & qos)
 {
   auto subscription = this->create_generic_subscription(
@@ -255,8 +322,8 @@ std::shared_ptr<rclcpp::GenericSubscription> ProtoRecorder::create_subscription(
       // Update topic rate statistics
       update_topic_rate(topic_name, this->get_clock()->now());
       
-      // Do not start recording until all topics are subscribed
-      if (!paused_.load() && all_topics_subscribed_) {
+      // Only record if recording is started, not paused, and all topics are subscribed
+      if (is_recording_.load() && !paused_.load() && all_topics_subscribed_) {
         writer_->write(message, topic_name, topic_type, this->get_clock()->now());
       }
     });
@@ -493,6 +560,43 @@ rclcpp::QoS ProtoRecorder::adapt_qos_to_publishers(const std::string & topic_nam
   }
   
   return adapted_qos;
+}
+
+std::string ProtoRecorder::generate_timestamped_uri(const std::string & prefix)
+{
+  auto now = std::chrono::system_clock::now();
+  auto time_t = std::chrono::system_clock::to_time_t(now);
+  
+  std::stringstream ss;
+  ss << prefix << "_" << std::put_time(std::localtime(&time_t), "%Y-%m-%dT%H-%M-%S");
+  
+  // Add timezone offset
+  auto local_time = std::localtime(&time_t);
+  char tz_buffer[16];
+  std::strftime(tz_buffer, sizeof(tz_buffer), "%z", local_time);
+  
+  // Convert +0900 format to +09:00 format if needed, but ROS bag uses +0900 format
+  ss << tz_buffer;
+  
+  return ss.str();
+}
+
+void ProtoRecorder::on_start(const std_msgs::msg::Bool::SharedPtr msg)
+{
+  if (msg->data && !is_recording_.load()) {
+    start();
+  } else if (!msg->data && is_recording_.load()) {
+    stop();
+  }
+}
+
+void ProtoRecorder::on_pause(const std_msgs::msg::Bool::SharedPtr msg)
+{
+  if (msg->data && !is_paused()) {
+    pause();
+  } else if (!msg->data && is_paused()) {
+    resume();
+  }
 }
 
 }  // namespace proto_recorder

@@ -50,5 +50,8 @@
     <param name="rate_check_window_size" value="$(var rate_check_window_size)"/>
     <param name="diagnostics_period" value="$(var diagnostics_period)"/>
     <param name="wait_for_stable_rates" value="$(var wait_for_stable_rates)"/>
+
+    <remap from="~/input/start" to="/recorder/start"/>
+    <remap from="~/input/pause" to="/recorder/pause"/>
   </node>
 </launch>
