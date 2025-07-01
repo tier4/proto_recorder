@@ -101,7 +101,7 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
     rclcpp::QoS(1).transient_local(),
     std::bind(&ProtoRecorder::on_pause, this, std::placeholders::_1));
 
-  record();
+  start();
 }
 
 ProtoRecorder::~ProtoRecorder()
@@ -178,17 +178,6 @@ void ProtoRecorder::start()
 
   is_recording_.store(true);
   RCLCPP_INFO(get_logger(), "Recording started.");
-}
-
-void ProtoRecorder::record()
-{
-  // Legacy method - calls start for backward compatibility
-  start();
-  
-  if (record_options_.start_paused) {
-    RCLCPP_INFO(
-      get_logger(), "Recording started but paused. Call resume() to start recording.");
-  }
 }
 
 void ProtoRecorder::stop()
