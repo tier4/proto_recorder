@@ -101,10 +101,11 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
     rclcpp::QoS(1).transient_local(),
     std::bind(&ProtoRecorder::on_pause, this, std::placeholders::_1));
 
-  // Initialize subscriptions once
-  initialize_subscriptions();
-  
+  // Start recording first to open the writer
   start();
+  
+  // Initialize subscriptions after writer is opened
+  initialize_subscriptions();
 }
 
 ProtoRecorder::~ProtoRecorder()
@@ -158,30 +159,39 @@ void ProtoRecorder::start()
     throw std::runtime_error("No serialization format specified!");
   }
   
-  // Generate timestamped URI using original prefix
-  storage_options_.uri = generate_timestamped_uri(original_uri_prefix_);
-  
-  RCLCPP_INFO(get_logger(), "Opening writer with URI: %s, serialization format: %s", 
-              storage_options_.uri.c_str(), record_options_.rmw_serialization_format.c_str());
-  
-  // Create new writer instance
-  writer_ = std::make_shared<rosbag2_cpp::Writer>();
-  writer_->open(
-    storage_options_,
-    {rmw_get_serialization_format(), record_options_.rmw_serialization_format});
+  try {
+    // Generate timestamped URI using original prefix
+    storage_options_.uri = generate_timestamped_uri(original_uri_prefix_);
+    
+    RCLCPP_INFO(get_logger(), "Opening writer with URI: %s, serialization format: %s", 
+                storage_options_.uri.c_str(), record_options_.rmw_serialization_format.c_str());
+    
+    // Create new writer instance
+    writer_ = std::make_shared<rosbag2_cpp::Writer>();
+    writer_->open(
+      storage_options_,
+      {rmw_get_serialization_format(), record_options_.rmw_serialization_format});
 
-  // Re-create topics in the new writer
-  for (const auto & [topic_name, subscription] : subscriptions_) {
-    auto & info = topic_info_[topic_name];
-    rosbag2_storage::TopicMetadata topic_metadata;
-    topic_metadata.name = topic_name;
-    topic_metadata.type = info.type;
-    topic_metadata.serialization_format = serialization_format_;
-    writer_->create_topic(topic_metadata);
+    // Re-create topics in the new writer
+    for (const auto & [topic_name, subscription] : subscriptions_) {
+      auto & info = topic_info_[topic_name];
+      rosbag2_storage::TopicMetadata topic_metadata;
+      topic_metadata.name = topic_name;
+      topic_metadata.type = info.type;
+      topic_metadata.serialization_format = serialization_format_;
+      writer_->create_topic(topic_metadata);
+    }
+
+    is_recording_.store(true);
+    RCLCPP_INFO(get_logger(), "Recording started.");
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(get_logger(), "Failed to start recording: %s", e.what());
+    if (writer_) {
+      writer_->close();
+      writer_.reset();
+    }
+    throw;
   }
-
-  is_recording_.store(true);
-  RCLCPP_INFO(get_logger(), "Recording started.");
 }
 
 void ProtoRecorder::stop()
@@ -193,13 +203,17 @@ void ProtoRecorder::stop()
   
   RCLCPP_INFO(get_logger(), "Stopping recording...");
   
-  if (writer_) {
-    writer_->close();
-    writer_.reset();
-  }
-  
   is_recording_.store(false);
   paused_.store(false);  // Reset paused state
+  
+  try {
+    if (writer_) {
+      writer_->close();
+      writer_.reset();
+    }
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(get_logger(), "Error closing writer: %s", e.what());
+  }
   
   RCLCPP_INFO(get_logger(), "Recording stopped.");
 }
@@ -311,7 +325,14 @@ std::shared_ptr<rclcpp::GenericSubscription> ProtoRecorder::create_generic_topic
       
       // Only record if recording is started, not paused, and all topics are subscribed
       if (is_recording_.load() && !paused_.load() && all_topics_subscribed_) {
-        writer_->write(message, topic_name, topic_type, this->get_clock()->now());
+        try {
+          if (writer_) {
+            writer_->write(message, topic_name, topic_type, this->get_clock()->now());
+          }
+        } catch (const std::exception & e) {
+          RCLCPP_ERROR(get_logger(), "Error writing message to bag for topic '%s': %s", 
+                       topic_name.c_str(), e.what());
+        }
       }
     });
   return subscription;
