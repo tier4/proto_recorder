@@ -56,7 +56,7 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   wait_for_stable_rates_ = declare_parameter<bool>("wait_for_stable_rates", false);
   
   // Hardware ID parameter for diagnostics
-  auto hardware_id = declare_parameter<std::string>("hardware_id", "proto_recorder");
+  hardware_id_ = declare_parameter<std::string>("hardware_id", "proto_recorder");
   
   // Initialize writer
   writer_ = std::make_shared<rosbag2_cpp::Writer>();
@@ -67,11 +67,14 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   // Set serialization format
   serialization_format_ = record_options_.rmw_serialization_format;
   
-  // Initialize diagnostics updater
-  updater_ = std::make_unique<diagnostic_updater::Updater>(this);
-  updater_->setHardwareID(hardware_id);
-  updater_->add("topic_rates", std::bind(&ProtoRecorder::check_topic_rates, this, std::placeholders::_1));
-  updater_->setPeriod(diagnostics_period_);
+  // Initialize status publisher
+  status_publisher_ = this->create_publisher<proto_recorder_msgs::msg::RecorderStatus>(
+    "proto_recorder/status", rclcpp::QoS(10));
+  
+  // Create timer for periodic status updates
+  status_timer_ = this->create_wall_timer(
+    std::chrono::duration<double>(diagnostics_period_),
+    std::bind(&ProtoRecorder::check_topic_rates, this));
   
   RCLCPP_INFO(
     this->get_logger(),
@@ -401,10 +404,17 @@ void ProtoRecorder::update_topic_rate(const std::string & topic_name, const rclc
   // Rate calculation is done in check_topic_rates
 }
 
-void ProtoRecorder::check_topic_rates(diagnostic_updater::DiagnosticStatusWrapper & stat)
+void ProtoRecorder::check_topic_rates()
 {
-  int8_t level = diagnostic_msgs::msg::DiagnosticStatus::OK;
-  std::string message = "Topic rates are normal";
+  auto status_msg = std::make_unique<proto_recorder_msgs::msg::RecorderStatus>();
+  status_msg->header.stamp = this->get_clock()->now();
+  status_msg->hardware_id = hardware_id_;
+  status_msg->is_recording = (writer_ != nullptr && !paused_);
+  
+  status_msg->recording_duration = 0.0; // TODO: Calculate actual duration
+  
+  uint8_t error_level = proto_recorder_msgs::msg::RecorderStatus::ERROR_LEVEL_OK;
+  std::string status_message = "Topic rates are normal";
   std::vector<std::string> abnormal_topics;
   bool all_rates_stable = true;
   
@@ -458,34 +468,60 @@ void ProtoRecorder::check_topic_rates(diagnostic_updater::DiagnosticStatusWrappe
       info.rate = 0.0;
     } 
     
-    // Format rate string with 2 decimal places
-    std::string rate_str = std::to_string(info.rate);
-    rate_str = rate_str.substr(0, rate_str.find(".") + 3); // 小数点以下2桁まで
-    stat.add(topic_name, rate_str);
+    // Create TopicStatus message
+    proto_recorder_msgs::msg::TopicStatus topic_status_msg;
+    topic_status_msg.name = topic_name;
+    topic_status_msg.type = info.type;
+    topic_status_msg.rate = info.rate;
     
-    // Check if rate is within expected range
-    if (info.min_rate > 0.0 && info.max_rate > 0.0) {
-      if (info.rate < info.min_rate || info.rate > info.max_rate) {
-        level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
+    // Determine rate status
+    if (info.message_times.empty()) {
+      topic_status_msg.rate_status = proto_recorder_msgs::msg::TopicStatus::RATE_STATUS_NO_MESSAGES;
+      error_level = proto_recorder_msgs::msg::RecorderStatus::ERROR_LEVEL_WARN;
+      abnormal_topics.push_back(topic_name + " (no messages)");
+      all_rates_stable = false;
+    } else if (info.min_rate > 0.0 && info.max_rate > 0.0) {
+      if (info.rate < info.min_rate) {
+        topic_status_msg.rate_status = proto_recorder_msgs::msg::TopicStatus::RATE_STATUS_TOO_LOW;
+        error_level = proto_recorder_msgs::msg::RecorderStatus::ERROR_LEVEL_WARN;
+        std::string rate_str = std::to_string(info.rate);
+        rate_str = rate_str.substr(0, rate_str.find(".") + 3);
         abnormal_topics.push_back(topic_name + " (" + rate_str + " Hz)");
         all_rates_stable = false;
+      } else if (info.rate > info.max_rate) {
+        topic_status_msg.rate_status = proto_recorder_msgs::msg::TopicStatus::RATE_STATUS_TOO_HIGH;
+        error_level = proto_recorder_msgs::msg::RecorderStatus::ERROR_LEVEL_WARN;
+        std::string rate_str = std::to_string(info.rate);
+        rate_str = rate_str.substr(0, rate_str.find(".") + 3);
+        abnormal_topics.push_back(topic_name + " (" + rate_str + " Hz)");
+        all_rates_stable = false;
+      } else {
+        topic_status_msg.rate_status = proto_recorder_msgs::msg::TopicStatus::RATE_STATUS_NORMAL;
       }
     } else if (info.message_times.size() < rate_check_window_size_) {
-      // If we don't have enough messages yet and no rate range is specified,
-      // consider the rate unstable
+      topic_status_msg.rate_status = proto_recorder_msgs::msg::TopicStatus::RATE_STATUS_UNKNOWN;
+      // UNKNOWNは一時的な状態なので、error_levelは上げない
       all_rates_stable = false;
+    } else {
+      topic_status_msg.rate_status = proto_recorder_msgs::msg::TopicStatus::RATE_STATUS_NORMAL;
     }
+    
+    status_msg->topic_statuses.push_back(topic_status_msg);
   }
   
   // Update summary message if there are abnormal topics
   if (!abnormal_topics.empty()) {
-    message = "Abnormal rates for topics: " + abnormal_topics[0];
+    status_message = "Abnormal rates for topics: " + abnormal_topics[0];
     for (size_t i = 1; i < abnormal_topics.size(); ++i) {
-      message += ", " + abnormal_topics[i];
+      status_message += ", " + abnormal_topics[i];
     }
   }
   
-  stat.summary(level, message);
+  status_msg->error_level = error_level;
+  status_msg->status_message = status_message;
+  
+  // Publish status message
+  status_publisher_->publish(std::move(status_msg));
   
   // If we're waiting for stable rates and all rates are now stable, resume recording
   if (wait_for_stable_rates_ && all_rates_stable && paused_.load() && all_topics_subscribed_) {

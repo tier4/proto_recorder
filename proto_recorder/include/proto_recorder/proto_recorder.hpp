@@ -12,7 +12,8 @@
 #include <rosbag2_cpp/writer.hpp>
 #include <rosbag2_storage/storage_options.hpp>
 #include <rosbag2_transport/record_options.hpp>
-#include <diagnostic_updater/diagnostic_updater.hpp>
+#include <proto_recorder_msgs/msg/recorder_status.hpp>
+#include <proto_recorder_msgs/msg/topic_status.hpp>
 #include <std_msgs/msg/bool.hpp>
 
 namespace proto_recorder
@@ -80,7 +81,7 @@ private:
   void update_topic_rate(const std::string & topic_name, const rclcpp::Time & now);
   
   // Diagnostics callback
-  void check_topic_rates(diagnostic_updater::DiagnosticStatusWrapper & stat);
+  void check_topic_rates();
   
   // Member variables
   std::shared_ptr<rosbag2_cpp::Writer> writer_;
@@ -100,9 +101,11 @@ private:
   std::unordered_map<std::string, TopicInfo> topic_info_;
   size_t rate_check_window_size_{10};
   
-  // Diagnostics
-  std::unique_ptr<diagnostic_updater::Updater> updater_;
+  // Status publishing
+  rclcpp::Publisher<proto_recorder_msgs::msg::RecorderStatus>::SharedPtr status_publisher_;
+  rclcpp::TimerBase::SharedPtr status_timer_;
   double diagnostics_period_{1.0};
+  std::string hardware_id_;
 
   // Flag to indicate if we are waiting for stable rates
   std::atomic<bool> wait_for_stable_rates_{false};

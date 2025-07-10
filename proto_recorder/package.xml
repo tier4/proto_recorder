@@ -14,8 +14,7 @@
   <depend>rosbag2_cpp</depend>
   <depend>rosbag2_storage</depend>
   <depend>rosbag2_transport</depend>
-  <depend>diagnostic_msgs</depend>
-  <depend>diagnostic_updater</depend>
+  <depend>proto_recorder_msgs</depend>
   <depend>std_msgs</depend>
   <depend>yaml-cpp</depend>
 
