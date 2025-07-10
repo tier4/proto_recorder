@@ -411,7 +411,6 @@ void ProtoRecorder::check_topic_rates()
   status_msg->hardware_id = hardware_id_;
   status_msg->is_recording = (writer_ != nullptr && !paused_);
   
-  status_msg->recording_duration = 0.0; // TODO: Calculate actual duration
   
   uint8_t error_level = proto_recorder_msgs::msg::RecorderStatus::ERROR_LEVEL_OK;
   std::string status_message = "Topic rates are normal";

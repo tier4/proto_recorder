@@ -6,7 +6,6 @@ string hardware_id
 
 # Recording status
 bool is_recording
-float64 recording_duration
 
 # Overall status
 uint8 ERROR_LEVEL_OK = 0
