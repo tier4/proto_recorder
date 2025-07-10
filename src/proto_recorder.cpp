@@ -55,6 +55,9 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   // Add parameter to wait for stable rates before recording
   wait_for_stable_rates_ = declare_parameter<bool>("wait_for_stable_rates", false);
   
+  // Hardware ID parameter for diagnostics
+  auto hardware_id = declare_parameter<std::string>("hardware_id", "proto_recorder");
+  
   // Initialize writer
   writer_ = std::make_shared<rosbag2_cpp::Writer>();
   
@@ -66,7 +69,7 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   
   // Initialize diagnostics updater
   updater_ = std::make_unique<diagnostic_updater::Updater>(this);
-  updater_->setHardwareID("proto_recorder");
+  updater_->setHardwareID(hardware_id);
   updater_->add("topic_rates", std::bind(&ProtoRecorder::check_topic_rates, this, std::placeholders::_1));
   updater_->setPeriod(diagnostics_period_);
   
