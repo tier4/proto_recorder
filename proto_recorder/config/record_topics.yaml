@@ -1,5 +1,7 @@
 topics:
   - name: /topic1
-    hz_range: [18.0, 21.0]
+    min_rate: 18.0
+    max_rate: 21.0
   - name: /topic2
-    hz_range: [18.0, 21.0]
+    min_rate: 18.0
+    max_rate: 21.0

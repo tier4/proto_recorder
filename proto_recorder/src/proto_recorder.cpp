@@ -134,10 +134,10 @@ std::vector<std::string> ProtoRecorder::load_topics_from_file(const std::string 
           topics.push_back(topic_name);
           RCLCPP_INFO(get_logger(), "Added topic from file: %s", topic_name.c_str());
           
-          // Load hz_range if available
-          if (topic["hz_range"] && topic["hz_range"].IsSequence() && topic["hz_range"].size() == 2) {
-            double min_rate = topic["hz_range"][0].as<double>();
-            double max_rate = topic["hz_range"][1].as<double>();
+          // Load min_rate and max_rate if available
+          if (topic["min_rate"] && topic["max_rate"]) {
+            double min_rate = topic["min_rate"].as<double>();
+            double max_rate = topic["max_rate"].as<double>();
             topic_info_[topic_name].min_rate = min_rate;
             topic_info_[topic_name].max_rate = max_rate;
             RCLCPP_INFO(get_logger(), "  Rate range: %.1f - %.1f Hz", min_rate, max_rate);
