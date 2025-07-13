@@ -59,5 +59,6 @@
 
     <remap from="~/input/start" to="/recorder/start"/>
     <remap from="~/input/pause" to="/recorder/pause"/>
+    <remap from="~/output/status" to="/recorder/status"/>
   </node>
 </launch>

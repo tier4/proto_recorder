@@ -69,7 +69,7 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   
   // Initialize status publisher
   status_publisher_ = this->create_publisher<proto_recorder_msgs::msg::RecorderStatus>(
-    "proto_recorder/status", rclcpp::QoS(10));
+    "~/output/status", rclcpp::QoS(10));
   
   // Create timer for periodic status updates
   status_timer_ = this->create_wall_timer(
