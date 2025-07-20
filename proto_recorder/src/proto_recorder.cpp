@@ -58,8 +58,8 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   // Hardware ID parameter for diagnostics
   hardware_id_ = declare_parameter<std::string>("hardware_id", "proto_recorder");
   
-  // Initialize writer
-  writer_ = std::make_shared<rosbag2_cpp::Writer>();
+  // Add parameter to control whether to start recording on initialization
+  bool start_recording = declare_parameter<bool>("start_recording", true);
   
   // Set initial paused state - pause if we're waiting for stable rates or start_paused is true
   paused_ = record_options_.start_paused || wait_for_stable_rates_;
@@ -96,7 +96,16 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
       storage_options_.storage_preset_profile.c_str());
   }
   
-  // Create control subscriptions
+  // Initialize subscriptions (without writer dependency)
+  initialize_subscriptions();
+
+  // Conditionally start recording based on the start_recording parameter
+  if (start_recording) {
+    // Start recording to open the writer
+    start();
+  }
+
+  // Create control subscriptions last to avoid race conditions with transient_local messages
   start_stop_sub_ = this->create_subscription<std_msgs::msg::Bool>(
     "~/input/start",
     rclcpp::QoS(1).transient_local(),
@@ -106,12 +115,6 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
     "~/input/pause",
     rclcpp::QoS(1).transient_local(),
     std::bind(&ProtoRecorder::on_pause, this, std::placeholders::_1));
-
-  // Start recording first to open the writer
-  start();
-  
-  // Initialize subscriptions after writer is opened
-  initialize_subscriptions();
 }
 
 ProtoRecorder::~ProtoRecorder()
@@ -166,27 +169,11 @@ void ProtoRecorder::start()
   }
   
   try {
-    // Generate timestamped URI using original prefix
-    storage_options_.uri = generate_timestamped_uri(original_uri_prefix_);
+    // Initialize writer and open storage
+    initialize_writer();
     
-    RCLCPP_INFO(get_logger(), "Opening writer with URI: %s, serialization format: %s", 
-                storage_options_.uri.c_str(), record_options_.rmw_serialization_format.c_str());
-    
-    // Create new writer instance
-    writer_ = std::make_shared<rosbag2_cpp::Writer>();
-    writer_->open(
-      storage_options_,
-      {rmw_get_serialization_format(), record_options_.rmw_serialization_format});
-
-    // Re-create topics in the new writer
-    for (const auto & [topic_name, subscription] : subscriptions_) {
-      auto & info = topic_info_[topic_name];
-      rosbag2_storage::TopicMetadata topic_metadata;
-      topic_metadata.name = topic_name;
-      topic_metadata.type = info.type;
-      topic_metadata.serialization_format = serialization_format_;
-      writer_->create_topic(topic_metadata);
-    }
+    // Register existing topics to writer
+    register_topics_to_writer();
 
     is_recording_.store(true);
     RCLCPP_INFO(get_logger(), "Recording started.");
@@ -281,14 +268,6 @@ void ProtoRecorder::subscribe_topics(const std::vector<std::string> & topics)
 void ProtoRecorder::subscribe_topic(const std::string & topic_name, const std::string & topic_type)
 {
   RCLCPP_INFO(get_logger(), "Subscribing to topic '%s' with type '%s'", topic_name.c_str(), topic_type.c_str());
-  // Create topic metadata
-  rosbag2_storage::TopicMetadata topic_metadata;
-  topic_metadata.name = topic_name;
-  topic_metadata.type = topic_type;
-  topic_metadata.serialization_format = serialization_format_;
-  
-  // Create topic in writer
-  writer_->create_topic(topic_metadata);
   
   // Initialize topic info for rate checking
   topic_info_[topic_name].name = topic_name;
@@ -310,7 +289,6 @@ void ProtoRecorder::subscribe_topic(const std::string & topic_name, const std::s
       qos.get_rmw_qos_profile().reliability == RMW_QOS_POLICY_RELIABILITY_RELIABLE ? "RELIABLE" : "BEST_EFFORT",
       qos.get_rmw_qos_profile().durability == RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL ? "TRANSIENT_LOCAL" : "VOLATILE");
   } else {
-    writer_->remove_topic(topic_metadata);
     RCLCPP_ERROR(
       get_logger(),
       "Failed to subscribe to topic '%s'",
@@ -611,10 +589,14 @@ std::string ProtoRecorder::generate_timestamped_uri(const std::string & prefix)
 
 void ProtoRecorder::on_start(const std_msgs::msg::Bool::SharedPtr msg)
 {
-  if (msg->data && !is_recording_.load()) {
-    start();
-  } else if (!msg->data && is_recording_.load()) {
-    stop();
+  if (msg->data) {
+    if (!is_recording_.load()) {
+      start();
+    }
+  } else {
+    if (is_recording_.load()) {
+      stop();
+    }
   }
 }
 
@@ -629,10 +611,6 @@ void ProtoRecorder::on_pause(const std_msgs::msg::Bool::SharedPtr msg)
 
 void ProtoRecorder::initialize_subscriptions()
 {
-  if (subscriptions_initialized_.load()) {
-    return;
-  }
-  
   if (!record_options_.topics.empty()) {
     RCLCPP_INFO(get_logger(), "Initializing subscriptions to specified topics");
     subscribe_topics(record_options_.topics);
@@ -643,8 +621,39 @@ void ProtoRecorder::initialize_subscriptions()
   } else {
     RCLCPP_WARN(get_logger(), "No topics specified for recording.");
   }
+}
+
+void ProtoRecorder::initialize_writer()
+{
+  // Generate timestamped URI using original prefix
+  storage_options_.uri = generate_timestamped_uri(original_uri_prefix_);
   
-  subscriptions_initialized_.store(true);
+  RCLCPP_INFO(get_logger(), "Opening writer with URI: %s, serialization format: %s", 
+              storage_options_.uri.c_str(), record_options_.rmw_serialization_format.c_str());
+  
+  // Create new writer instance
+  writer_ = std::make_shared<rosbag2_cpp::Writer>();
+  writer_->open(
+    storage_options_,
+    {rmw_get_serialization_format(), record_options_.rmw_serialization_format});
+}
+
+void ProtoRecorder::register_topics_to_writer()
+{
+  // Register all existing subscriptions' topics to the writer
+  for (const auto & [topic_name, subscription] : subscriptions_) {
+    if (topic_info_.find(topic_name) != topic_info_.end()) {
+      auto & info = topic_info_[topic_name];
+      if (!info.type.empty()) {
+        rosbag2_storage::TopicMetadata topic_metadata;
+        topic_metadata.name = topic_name;
+        topic_metadata.type = info.type;
+        topic_metadata.serialization_format = serialization_format_;
+        writer_->create_topic(topic_metadata);
+        RCLCPP_DEBUG(get_logger(), "Registered topic '%s' to writer", topic_name.c_str());
+      }
+    }
+  }
 }
 
 }  // namespace proto_recorder

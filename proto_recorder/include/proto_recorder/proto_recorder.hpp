@@ -119,9 +119,6 @@ private:
   
   // Original URI prefix (without timestamp)
   std::string original_uri_prefix_;
-  
-  // Flag to indicate if subscriptions have been initialized
-  std::atomic<bool> subscriptions_initialized_{false};
 
   // Generate timestamped URI
   std::string generate_timestamped_uri(const std::string & prefix);
@@ -132,6 +129,12 @@ private:
 
   rclcpp::QoS get_subscription_qos_for_topic(const std::string & topic_name);
   rclcpp::QoS adapt_qos_to_publishers(const std::string & topic_name);
+  
+  // Initialize writer and open storage
+  void initialize_writer();
+  
+  // Register existing topics to writer
+  void register_topics_to_writer();
 };
 
 }  // namespace proto_recorder
