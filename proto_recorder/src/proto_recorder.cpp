@@ -10,6 +10,7 @@
 
 #include <rosbag2_cpp/writer.hpp>
 #include <rosbag2_storage/topic_metadata.hpp>
+#include <rosbag2_transport/qos.hpp>
 #include <yaml-cpp/yaml.h>
 #include <std_msgs/msg/bool.hpp>
 
@@ -173,7 +174,7 @@ void ProtoRecorder::start()
     initialize_writer();
     
     // Register existing topics to writer
-    register_topics_to_writer();
+    register_all_topics_to_writer();
 
     is_recording_.store(true);
     RCLCPP_INFO(get_logger(), "Recording started.");
@@ -281,6 +282,12 @@ void ProtoRecorder::subscribe_topic(const std::string & topic_name, const std::s
   
   if (subscription) {
     subscriptions_[topic_name] = subscription;
+    
+    // If we're already recording, register the topic to the writer
+    if (is_recording_.load()) {
+      register_topic_to_writer(topic_name, topic_type);
+    }
+    
     RCLCPP_INFO(
       get_logger(),
       "Subscribed to topic '%s' with type '%s' using %s reliability and %s durability",
@@ -638,19 +645,43 @@ void ProtoRecorder::initialize_writer()
     {rmw_get_serialization_format(), record_options_.rmw_serialization_format});
 }
 
-void ProtoRecorder::register_topics_to_writer()
+std::string ProtoRecorder::serialized_offered_qos_profiles_for_topic(const std::string & topic_name)
+{
+  YAML::Node offered_qos_profiles;
+  auto endpoints = this->get_publishers_info_by_topic(topic_name);
+  for (const auto & info : endpoints) {
+    offered_qos_profiles.push_back(rosbag2_transport::Rosbag2QoS(info.qos_profile()));
+  }
+  return YAML::Dump(offered_qos_profiles);
+}
+
+void ProtoRecorder::register_topic_to_writer(const std::string & topic_name, const std::string & topic_type)
+{
+  if (!writer_) {
+    RCLCPP_WARN(get_logger(), "Writer is not initialized, cannot register topic '%s'", topic_name.c_str());
+    return;
+  }
+  
+  rosbag2_storage::TopicMetadata topic_metadata;
+  topic_metadata.name = topic_name;
+  topic_metadata.type = topic_type;
+  topic_metadata.serialization_format = serialization_format_;
+  
+  // Serialize QoS profiles from publishers
+  topic_metadata.offered_qos_profiles = serialized_offered_qos_profiles_for_topic(topic_name);
+  
+  writer_->create_topic(topic_metadata);
+  RCLCPP_DEBUG(get_logger(), "Registered topic '%s' to writer with QoS profiles", topic_name.c_str());
+}
+
+void ProtoRecorder::register_all_topics_to_writer()
 {
   // Register all existing subscriptions' topics to the writer
   for (const auto & [topic_name, subscription] : subscriptions_) {
     if (topic_info_.find(topic_name) != topic_info_.end()) {
       auto & info = topic_info_[topic_name];
       if (!info.type.empty()) {
-        rosbag2_storage::TopicMetadata topic_metadata;
-        topic_metadata.name = topic_name;
-        topic_metadata.type = info.type;
-        topic_metadata.serialization_format = serialization_format_;
-        writer_->create_topic(topic_metadata);
-        RCLCPP_DEBUG(get_logger(), "Registered topic '%s' to writer", topic_name.c_str());
+        register_topic_to_writer(topic_name, info.type);
       }
     }
   }

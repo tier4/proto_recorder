@@ -133,8 +133,14 @@ private:
   // Initialize writer and open storage
   void initialize_writer();
   
-  // Register existing topics to writer
-  void register_topics_to_writer();
+  // Register all existing topics to writer
+  void register_all_topics_to_writer();
+  
+  // Register a single topic to writer
+  void register_topic_to_writer(const std::string & topic_name, const std::string & topic_type);
+  
+  // Serialize QoS profiles for a topic
+  std::string serialized_offered_qos_profiles_for_topic(const std::string & topic_name);
 };
 
 }  // namespace proto_recorder
