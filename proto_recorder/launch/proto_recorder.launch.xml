@@ -7,6 +7,8 @@
   <arg name="serialization_format" default="cdr" description="Serialization format to use"/>
   <arg name="start_paused" default="false" description="Start recording in paused state"/>
   <arg name="start_recording" default="false" description="Start recording immediately when node starts"/>
+  <arg name="dir_permission" default="" description="Directory permission for the recorded bag (e.g., '777'). If empty, defaults to umask."/>
+  <arg name="file_permission" default="" description="File permission for the recorded bag files (e.g., '666'). If empty, defaults to umask."/>
   
   <!-- Storage configuration arguments -->
   <arg name="storage_config_uri" default="" description="Path to a YAML file defining storage specific configurations"/>
@@ -37,6 +39,8 @@
     <param name="serialization_format" value="$(var serialization_format)"/>
     <param name="start_paused" value="$(var start_paused)"/>
     <param name="start_recording" value="$(var start_recording)"/>
+    <param name="dir_permission" value="$(var dir_permission)"/>
+    <param name="file_permission" value="$(var file_permission)"/>
     
     <!-- Storage configuration parameters -->
     <param name="storage_config_uri" value="$(var storage_config_uri)"/>

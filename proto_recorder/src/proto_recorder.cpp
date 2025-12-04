@@ -7,6 +7,7 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <filesystem>
 
 #include <rosbag2_cpp/writer.hpp>
 #include <rosbag2_storage/topic_metadata.hpp>
@@ -26,6 +27,9 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
   
   // Save original URI prefix
   original_uri_prefix_ = storage_options_.uri;
+  
+  dir_permission_ = declare_parameter<std::string>("dir_permission", "");
+  file_permission_ = declare_parameter<std::string>("file_permission", "");
   
   // Add storage configuration parameters - use int64_t instead of uint64_t to avoid ambiguity
   storage_options_.max_bagfile_size = static_cast<uint64_t>(declare_parameter<int64_t>("max_bagfile_size", 0));
@@ -643,6 +647,33 @@ void ProtoRecorder::initialize_writer()
   writer_->open(
     storage_options_,
     {rmw_get_serialization_format(), record_options_.rmw_serialization_format});
+
+  if (!dir_permission_.empty()) {
+    try {
+      std::filesystem::permissions(
+        storage_options_.uri,
+        static_cast<std::filesystem::perms>(std::stoul(dir_permission_, nullptr, 8)),
+        std::filesystem::perm_options::replace);
+        RCLCPP_INFO(get_logger(), "Set directory permission to %s", dir_permission_.c_str());
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(get_logger(), "Failed to set directory permission: %s", e.what());
+    }
+  }
+
+  if (!file_permission_.empty()) {
+    try {
+      auto perms = static_cast<std::filesystem::perms>(std::stoul(file_permission_, nullptr, 8));
+      for (const auto & entry : std::filesystem::directory_iterator(storage_options_.uri)) {
+        if (std::filesystem::is_regular_file(entry.status())) {
+          std::filesystem::permissions(entry.path(), perms, std::filesystem::perm_options::replace);
+        }
+      }
+      RCLCPP_INFO(get_logger(), "Set file permissions to %s for files in %s", 
+                  file_permission_.c_str(), storage_options_.uri.c_str());
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(get_logger(), "Failed to set file permissions: %s", e.what());
+    }
+  }
 }
 
 std::string ProtoRecorder::serialized_offered_qos_profiles_for_topic(const std::string & topic_name)

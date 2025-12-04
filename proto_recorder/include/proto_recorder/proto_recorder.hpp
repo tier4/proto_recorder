@@ -119,6 +119,8 @@ private:
   
   // Original URI prefix (without timestamp)
   std::string original_uri_prefix_;
+  std::string dir_permission_;
+  std::string file_permission_;
 
   // Generate timestamped URI
   std::string generate_timestamped_uri(const std::string & prefix);
