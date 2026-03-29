@@ -83,8 +83,12 @@ private:
   // Diagnostics callback
   void check_topic_rates();
   
+  // Cancel all timers and clear subscriptions to ensure clean shutdown
+  void cleanup_resources();
+
   // Member variables
   std::shared_ptr<rosbag2_cpp::Writer> writer_;
+  std::mutex writer_mutex_;  // Protects writer_ access during write/close
   rosbag2_storage::StorageOptions storage_options_;
   rosbag2_transport::RecordOptions record_options_;
   std::unordered_map<std::string, std::shared_ptr<rclcpp::GenericSubscription>> subscriptions_;

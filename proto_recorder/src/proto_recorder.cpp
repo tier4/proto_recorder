@@ -120,7 +120,22 @@ ProtoRecorder::ProtoRecorder(const rclcpp::NodeOptions & options)
 
 ProtoRecorder::~ProtoRecorder()
 {
+  cleanup_resources();
   stop();
+}
+
+void ProtoRecorder::cleanup_resources()
+{
+  // Cancel timers first to stop callbacks from firing
+  if (status_timer_) {
+    status_timer_->cancel();
+  }
+  if (topic_retry_timer_) {
+    topic_retry_timer_->cancel();
+  }
+
+  // Clear subscriptions to stop message callbacks
+  subscriptions_.clear();
 }
 
 std::vector<std::string> ProtoRecorder::load_topics_from_file(const std::string & file_path)
@@ -170,9 +185,10 @@ void ProtoRecorder::start()
   }
   
   try {
+    std::lock_guard<std::mutex> lock(writer_mutex_);
     // Initialize writer and open storage
     initialize_writer();
-    
+
     // Register existing topics to writer
     register_all_topics_to_writer();
 
@@ -180,6 +196,7 @@ void ProtoRecorder::start()
     RCLCPP_INFO(get_logger(), "Recording started.");
   } catch (const std::exception & e) {
     RCLCPP_ERROR(get_logger(), "Failed to start recording: %s", e.what());
+    std::lock_guard<std::mutex> lock(writer_mutex_);
     if (writer_) {
       writer_->close();
       writer_.reset();
@@ -196,17 +213,22 @@ void ProtoRecorder::stop()
   }
   
   RCLCPP_INFO(get_logger(), "Stopping recording...");
-  
+
+  // Set flags first to prevent new writes from starting
   is_recording_.store(false);
-  paused_.store(false);  // Reset paused state
-  
-  try {
-    if (writer_) {
-      writer_->close();
-      writer_.reset();
+  paused_.store(false);
+
+  // Close writer under lock to avoid racing with write callbacks
+  {
+    std::lock_guard<std::mutex> lock(writer_mutex_);
+    try {
+      if (writer_) {
+        writer_->close();
+        writer_.reset();
+      }
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(get_logger(), "Error closing writer: %s", e.what());
     }
-  } catch (const std::exception & e) {
-    RCLCPP_ERROR(get_logger(), "Error closing writer: %s", e.what());
   }
   
   RCLCPP_INFO(get_logger(), "Recording stopped.");
@@ -285,6 +307,7 @@ void ProtoRecorder::subscribe_topic(const std::string & topic_name, const std::s
     
     // If we're already recording, register the topic to the writer
     if (is_recording_.load()) {
+      std::lock_guard<std::mutex> lock(writer_mutex_);
       register_topic_to_writer(topic_name, topic_type);
     }
     
@@ -316,12 +339,13 @@ std::shared_ptr<rclcpp::GenericSubscription> ProtoRecorder::create_generic_topic
       
       // Only record if recording is started, not paused, and all topics are subscribed
       if (is_recording_.load() && !paused_.load() && all_topics_subscribed_) {
+        std::lock_guard<std::mutex> lock(writer_mutex_);
         try {
           if (writer_) {
             writer_->write(message, topic_name, topic_type, this->get_clock()->now());
           }
         } catch (const std::exception & e) {
-          RCLCPP_ERROR(get_logger(), "Error writing message to bag for topic '%s': %s", 
+          RCLCPP_ERROR(get_logger(), "Error writing message to bag for topic '%s': %s",
                        topic_name.c_str(), e.what());
         }
       }
