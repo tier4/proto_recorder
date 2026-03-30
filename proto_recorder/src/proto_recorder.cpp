@@ -185,21 +185,25 @@ void ProtoRecorder::start()
   }
   
   try {
-    std::lock_guard<std::mutex> lock(writer_mutex_);
-    // Initialize writer and open storage
-    initialize_writer();
+    {
+      std::lock_guard<std::mutex> lock(writer_mutex_);
+      // Initialize writer and open storage
+      initialize_writer();
 
-    // Register existing topics to writer
-    register_all_topics_to_writer();
+      // Register existing topics to writer
+      register_all_topics_to_writer();
+    }
 
     is_recording_.store(true);
     RCLCPP_INFO(get_logger(), "Recording started.");
   } catch (const std::exception & e) {
     RCLCPP_ERROR(get_logger(), "Failed to start recording: %s", e.what());
-    std::lock_guard<std::mutex> lock(writer_mutex_);
-    if (writer_) {
-      writer_->close();
-      writer_.reset();
+    {
+      std::lock_guard<std::mutex> lock(writer_mutex_);
+      if (writer_) {
+        writer_->close();
+        writer_.reset();
+      }
     }
     throw;
   }
@@ -418,7 +422,7 @@ void ProtoRecorder::check_topic_rates()
   auto status_msg = std::make_unique<proto_recorder_msgs::msg::RecorderStatus>();
   status_msg->header.stamp = this->get_clock()->now();
   status_msg->hardware_id = hardware_id_;
-  status_msg->is_recording = (writer_ != nullptr && !paused_);
+  status_msg->is_recording = is_recording_.load() && !paused_.load();
   
   
   uint8_t error_level = proto_recorder_msgs::msg::RecorderStatus::ERROR_LEVEL_OK;
