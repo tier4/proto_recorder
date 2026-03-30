@@ -126,6 +126,9 @@ ProtoRecorder::~ProtoRecorder()
 
 void ProtoRecorder::cleanup_resources()
 {
+  // Stop writes as early as possible so in-flight callbacks bail out
+  is_recording_.store(false);
+
   // Cancel timers first to stop callbacks from firing
   if (status_timer_) {
     status_timer_->cancel();
@@ -134,8 +137,11 @@ void ProtoRecorder::cleanup_resources()
     topic_retry_timer_->cancel();
   }
 
-  // Clear subscriptions to stop message callbacks
-  subscriptions_.clear();
+  // Clear subscriptions under lock for multi-threaded executor safety
+  {
+    std::lock_guard<std::mutex> lock(subscriptions_mutex_);
+    subscriptions_.clear();
+  }
 }
 
 std::vector<std::string> ProtoRecorder::load_topics_from_file(const std::string & file_path)
@@ -307,8 +313,11 @@ void ProtoRecorder::subscribe_topic(const std::string & topic_name, const std::s
   auto subscription = create_generic_topic_subscription(topic_name, topic_type, qos);
   
   if (subscription) {
-    subscriptions_[topic_name] = subscription;
-    
+    {
+      std::lock_guard<std::mutex> lock(subscriptions_mutex_);
+      subscriptions_[topic_name] = subscription;
+    }
+
     // If we're already recording, register the topic to the writer
     if (is_recording_.load()) {
       std::lock_guard<std::mutex> lock(writer_mutex_);
@@ -381,14 +390,17 @@ void ProtoRecorder::retry_topics()
 {
   if (!record_options_.topics.empty()) {
     std::vector<std::string> topics_to_retry;
-    
-    for (const auto & topic : record_options_.topics) {
-      // Check if we're already subscribed to this topic
-      if (subscriptions_.find(topic) == subscriptions_.end()) {
-        topics_to_retry.push_back(topic);
+
+    {
+      std::lock_guard<std::mutex> lock(subscriptions_mutex_);
+      for (const auto & topic : record_options_.topics) {
+        // Check if we're already subscribed to this topic
+        if (subscriptions_.find(topic) == subscriptions_.end()) {
+          topics_to_retry.push_back(topic);
+        }
       }
     }
-    
+
     if (!topics_to_retry.empty()) {
       RCLCPP_INFO(get_logger(), "Retrying subscription to %zu topics", topics_to_retry.size());
       subscribe_topics(topics_to_retry);
