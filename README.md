@@ -20,7 +20,7 @@ cd ~/colcon_ws
 rosdep install --from-paths src --ignore-src -y
 
 # Build
-colcon build --symlink-install --packages-up-to proto_recorder
+colcon build --packages-up-to proto_recorder
 ```
 
 ## Usage
