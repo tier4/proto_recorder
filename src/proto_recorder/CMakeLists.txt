@@ -70,8 +70,26 @@ install(
 )
 
 if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  ament_lint_auto_find_test_dependencies()
+  find_package(ament_cmake_gtest REQUIRED)
+
+  set(TEST_FIXTURES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures")
+  set(TEST_DEPS rclcpp proto_recorder_msgs rosbag2_cpp rosbag2_storage rosbag2_transport std_msgs yaml-cpp)
+
+  # Helper macro to reduce repetition
+  macro(add_proto_recorder_test TEST_NAME)
+    ament_add_gtest(${TEST_NAME} test/${TEST_NAME}.cpp)
+    target_link_libraries(${TEST_NAME} proto_recorder)
+    target_compile_definitions(${TEST_NAME} PRIVATE
+      PROTO_RECORDER_TESTING
+      TEST_FIXTURES_DIR="${TEST_FIXTURES_DIR}")
+    ament_target_dependencies(${TEST_NAME} ${TEST_DEPS})
+  endmacro()
+
+  add_proto_recorder_test(test_load_topics_from_file)
+  add_proto_recorder_test(test_generate_timestamped_uri)
+  add_proto_recorder_test(test_topic_rate_logic)
+  add_proto_recorder_test(test_state_transitions)
+  add_proto_recorder_test(test_node_integration)
 endif()
 
 ament_export_include_directories(include)
