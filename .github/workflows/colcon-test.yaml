@@ -16,6 +16,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
+          apt-get install -y ros-humble-rosbag2-storage-mcap
           rosdep update
           rosdep install --from-paths src --ignore-src -y
 
