@@ -72,7 +72,11 @@ public:
   // Check if recording is paused
   bool is_paused() const;
 
+#ifdef PROTO_RECORDER_TESTING
+public:
+#else
 private:
+#endif
   // Load topics from YAML file
   std::vector<std::string> load_topics_from_file(const std::string & file_path);
 

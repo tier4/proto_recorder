@@ -1,0 +1,8 @@
+topics:
+  - name: /test/topic_a
+    min_rate: 9.0
+    max_rate: 11.0
+  - name: /test/topic_b
+    min_rate: 4.0
+    max_rate: 6.0
+  - name: /test/topic_no_rate
