@@ -1,0 +1,38 @@
+name: colcon-test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container:
+      image: ros:humble
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          rosdep update
+          rosdep install --from-paths src --ignore-src -y
+
+      - name: Build
+        run: |
+          . /opt/ros/humble/setup.sh
+          colcon build --cmake-args -DBUILD_TESTING=ON
+
+      - name: Test
+        run: |
+          . /opt/ros/humble/setup.sh
+          . install/setup.sh
+          colcon test --event-handlers console_direct+
+
+      - name: Test results
+        if: always()
+        run: |
+          . /opt/ros/humble/setup.sh
+          . install/setup.sh
+          colcon test-result --all --verbose
