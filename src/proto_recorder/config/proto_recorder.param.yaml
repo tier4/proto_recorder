@@ -1,8 +1,8 @@
 /**:
   ros__parameters:
     # Storage configuration
-    storage_id: "mcap" # Storage plugin to use (sqlite3, mcap, etc.)
-    uri: "proto_recording" # Output directory for recorded bag
+    storage_id: mcap # Storage plugin to use (sqlite3, mcap, etc.)
+    uri: proto_recording # Output directory for recorded bag
 
     # Bag splitting options
     max_bagfile_size: 0 # Maximum size in bytes before splitting (0 = no splitting)
@@ -23,7 +23,7 @@
     topics_file: "" # Path to YAML file containing topics to record
 
     # Recording options
-    serialization_format: "cdr" # Serialization format to use
+    serialization_format: cdr # Serialization format to use
     start_paused: false # Start recording in paused state
 
     # Topic rate check options
