@@ -7,25 +7,25 @@
   <arg name="serialization_format" default="cdr" description="Serialization format to use"/>
   <arg name="start_paused" default="false" description="Start recording in paused state"/>
   <arg name="start_recording" default="false" description="Start recording immediately when node starts"/>
-  
+
   <!-- Storage configuration arguments -->
   <arg name="storage_config_uri" default="" description="Path to a YAML file defining storage specific configurations"/>
   <arg name="storage_preset_profile" default="" description="Storage preset profile (e.g., 'fastwrite', 'zstd_fast', 'zstd_small' for MCAP)"/>
   <arg name="max_bagfile_size" default="0" description="Maximum size in bytes before the bagfile will be split"/>
   <arg name="max_bagfile_duration" default="0" description="Maximum duration in seconds before the bagfile will be split"/>
   <arg name="max_cache_size" default="0" description="Maximum size of messages to hold in cache"/>
-  
+
   <!-- Compression arguments -->
   <arg name="compression_mode" default="" description="Compression mode ('none', 'file', 'message')"/>
   <arg name="compression_format" default="" description="Compression format (e.g., 'zstd')"/>
   <arg name="compression_queue_size" default="1" description="Number of files/messages that may be queued for compression"/>
   <arg name="compression_threads" default="0" description="Number of compression threads (0 = number of CPU cores)"/>
-  
+
   <!-- Topic rate check arguments -->
   <arg name="rate_check_window_size" default="10" description="Number of messages to use for rate calculation"/>
   <arg name="diagnostics_period" default="5.0" description="Period in seconds for publishing diagnostics"/>
   <arg name="wait_for_stable_rates" default="false" description="Wait for stable rates before recording"/>
-  
+
   <!-- Diagnostics arguments -->
   <arg name="hardware_id" default="proto_recorder" description="Hardware ID for diagnostics updater"/>
 
@@ -37,25 +37,25 @@
     <param name="serialization_format" value="$(var serialization_format)"/>
     <param name="start_paused" value="$(var start_paused)"/>
     <param name="start_recording" value="$(var start_recording)"/>
-    
+
     <!-- Storage configuration parameters -->
     <param name="storage_config_uri" value="$(var storage_config_uri)"/>
     <param name="storage_preset_profile" value="$(var storage_preset_profile)"/>
     <param name="max_bagfile_size" value="$(var max_bagfile_size)"/>
     <param name="max_bagfile_duration" value="$(var max_bagfile_duration)"/>
     <param name="max_cache_size" value="$(var max_cache_size)"/>
-    
+
     <!-- Compression parameters -->
     <param name="compression_mode" value="$(var compression_mode)"/>
     <param name="compression_format" value="$(var compression_format)"/>
     <param name="compression_queue_size" value="$(var compression_queue_size)"/>
     <param name="compression_threads" value="$(var compression_threads)"/>
-    
+
     <!-- Topic rate check parameters -->
     <param name="rate_check_window_size" value="$(var rate_check_window_size)"/>
     <param name="diagnostics_period" value="$(var diagnostics_period)"/>
     <param name="wait_for_stable_rates" value="$(var wait_for_stable_rates)"/>
-    
+
     <!-- Diagnostics parameters -->
     <param name="hardware_id" value="$(var hardware_id)"/>
 
